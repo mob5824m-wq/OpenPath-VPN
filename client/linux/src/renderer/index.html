@@ -1,0 +1,50 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>OpenPath Linux</title>
+<style>
+*{box-sizing:border-box} body{margin:0;font-family:Inter,system-ui,sans-serif;background:#f8fafc;color:#0f172a}
+.topbar{background:#0f172a;color:#e2e8f0;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;-webkit-app-region:drag}
+.badge{background:#38bdf8;color:#0f172a;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700}
+.card{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:14px;margin:10px}
+.btn{border:0;border-radius:999px;padding:10px 14px;font-weight:700;cursor:pointer}
+.btn-primary{background:#0f172a;color:#fff}
+.log{background:#0b1220;color:#cbd5e1;padding:10px;border-radius:8px;font-family:monospace;font-size:11px;height:180px;overflow:auto}
+</style>
+</head>
+<body>
+<div class="topbar"><div><b>OpenPath VPN</b> <span style="opacity:.7">Linux — TLS over TCP :443 • HTTPS mimic</span></div><span class="badge">GhostPath v1</span></div>
+<div class="card">
+  <div id="status">Preparing Linux GUI…</div>
+  <div style="margin-top:10px;display:flex;gap:8px">
+    <button class="btn btn-primary" id="conn">Connect</button>
+    <button class="btn" id="disc">Disconnect</button>
+    <span id="stats" style="font-size:12px;color:#64748b"></span>
+  </div>
+  <div style="margin-top:10px;display:grid;grid-template-columns:1fr 1fr;gap:8px">
+    <input id="server" placeholder="wss://cdn.openpath.example.com/ops" style="padding:8px;border:1px solid #e2e8f0;border-radius:8px"/>
+    <input id="psk" placeholder="psk" type="password" style="padding:8px;border:1px solid #e2e8f0;border-radius:8px"/>
+  </div>
+</div>
+<div class="card"><div class="log" id="log"></div></div>
+<script>
+const logEl=document.getElementById('log');
+function log(s){ const d=document.createElement('div'); d.textContent='['+new Date().toLocaleTimeString()+'] '+s; logEl.appendChild(d); logEl.scrollTop=logEl.scrollHeight; }
+log('TLS profile: Chrome124 JA3 • ALPN h2 • SNI front • decoy site on / — school DPI sees HTTPS');
+if(window.openpathLinux){
+  openpathLinux.getConfig().then(c=>{ document.getElementById('server').value=c.serverUrl; document.getElementById('psk').value=c.psk; log('Config loaded from ~/.config/openpath/config.json'); });
+  document.getElementById('conn').onclick=async()=>{ const serverUrl=document.getElementById('server').value, psk=document.getElementById('psk').value;
+    log('Starting TUN (kernel if sudo, else SOCKS fallback 127.0.0.1:1080)...');
+    try{ const r=await openpathLinux.connect({serverUrl, psk, user:'demo'}); log('Tunnel up mode='+r.mode+' '+r.wsUrl.slice(0,60)+'...'); document.getElementById('status').textContent='Connected • '+r.mode; }catch(e){log('Error '+e.message)}
+  };
+  document.getElementById('disc').onclick=async()=>{ await openpathLinux.disconnect(); log('Disconnected — iptables cleaned'); document.getElementById('status').textContent='Disconnected'; };
+  openpathLinux.logs(s=> log(s));
+} else {
+  document.getElementById('status').textContent='Running in web preview fallback — use Electron binary locally for full Linux TUN';
+  log('Preview mode — native TUN requires Linux binary (openpath-linux/AppImage). See README for install.');
+}
+</script>
+</body>
+</html>

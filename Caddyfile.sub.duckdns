@@ -1,0 +1,29 @@
+# Caddyfile for SUB host DuckDNS — each sub gets its own domain
+# Usage: SUB_DUCKDNS_DOMAIN=openpath-sub1 docker compose -f docker-compose.sub.duckdns.yml up -d
+# Same as main but for sub role. Each sub should run on its own machine/VPS
+# so ports 80/443 don't conflict. If testing locally on same host, use different ports
+# and set ACME_DNS=duckdns (DNS challenge, no port 80 needed).
+
+{$SUB_DUCKDNS_DOMAIN}.duckdns.org, {$DUCKDNS_DOMAIN}.duckdns.org {
+	tls {
+		# For DNS-01 (no port 80) uncomment:
+		# dns duckdns {env.CADDY_DUCKDNS_TOKEN}
+	}
+	header {
+		X-Frame-Options "SAMEORIGIN"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+	log { output stdout; format console; level INFO }
+	reverse_proxy server:4434 {
+		header_up Host {host}
+		header_up X-Real-IP {remote}
+		header_up X-Forwarded-Proto {scheme}
+		header_up Connection {>Connection}
+		header_up Upgrade {>Upgrade}
+	}
+}
+
+# Health: http://sub.duckdns.org/health → proxied to sub server
+# Clients connect: wss://sub.duckdns.org/ops?auth=...

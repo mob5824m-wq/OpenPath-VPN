@@ -1,0 +1,79 @@
+services:
+  server:
+    build: ./
+    dockerfile: Dockerfile
+    expose:
+      - "4433"
+    ports:
+      # Direct port for local testing (outside Caddy). In prod, firewall only 80/443 via Caddy
+      - "127.0.0.1:4433:4433"
+    environment:
+      PORT: 4433
+      HOST: 0.0.0.0
+      DEMO_PSK: ${DEMO_PSK:-demo-student-key-do-not-use-prod}
+      OPS_PATH: ${OPS_PATH:-/ops}
+      DECOY_TITLE: ${DECOY_TITLE:-Alex Rivera — Photography Portfolio}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Let server know its public URL (for /api/info + QR)
+      PUBLIC_URL: ${PUBLIC_URL:-https://${DUCKDNS_DOMAIN:-openpath}.duckdns.org/ops}
+      DUCKDNS_DOMAIN: ${DUCKDNS_DOMAIN:-}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4433/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Caddy v2 — automatic HTTPS for *.duckdns.org via Let's Encrypt
+  # HTTP-01 challenge: requires 80+443 reachable. No extra config.
+  # DNS-01 challenge (if ISP blocks 80): set ACME_DNS=duckdns and provide token,
+  #   then use the caddy:2 image built with duckdns plugin (see comments below).
+  caddy:
+    image: caddy:2-alpine
+    # For DNS-01 via DuckDNS, replace with a custom Caddy build that has the duckdns DNS provider:
+    #   build:
+    #     context: .
+    #     dockerfile: Dockerfile.caddy-duckdns
+    #   # or prebuilt: ghcr.io/caddyserver/caddy:builder with xcaddy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"  # for HTTP/3 if enabled
+    environment:
+      DUCKDNS_DOMAIN: ${DUCKDNS_DOMAIN:-openpath}
+      ACME_DNS: ${ACME_DNS:-http}
+      # For DNS-01:
+      CADDY_DUCKDNS_TOKEN: ${DUCKDNS_TOKEN:-}
+    volumes:
+      - ./Caddyfile.duckdns:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      server:
+        condition: service_healthy
+    restart: unless-stopped
+    # Template the Caddyfile env var at startup (Caddy 2.8+ supports {$VAR} directly, but we also
+    # ensure DUCKDNS_DOMAIN is set). Healthcheck to surface cert errors early.
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:2019/metrics"]
+      interval: 30s
+
+volumes:
+  caddy_data:
+  caddy_config:
+
+# Usage:
+#   cp .env.duckdns.example .env   # fill DUCKDNS_DOMAIN + TOKEN + PSK
+#   docker compose -f docker-compose.duckdns.yml up -d --build
+#   docker compose -f docker-compose.duckdns.yml logs -f caddy
+#   curl -I https://$DUCKDNS_DOMAIN.duckdns.org/health   # → 200
+#
+# DNS-01 variant (ISP blocks port 80):
+#   1. Create Dockerfile.caddy-duckdns:
+#        FROM caddy:2-builder AS builder
+#        RUN xcaddy build --with github.com/caddy-dns/duckdns
+#        FROM caddy:2-alpine
+#        COPY --from=builder /usr/bin/caddy /usr/bin/caddy
+#   2. In Caddyfile.duckdns uncomment: tls { dns duckdns {env.CADDY_DUCKDNS_TOKEN} }
+#   3. Set ACME_DNS=duckdns in .env
+#   4. docker compose -f docker-compose.duckdns.yml up -d --build

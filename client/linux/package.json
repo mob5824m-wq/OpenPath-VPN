@@ -1,0 +1,39 @@
+{
+  "name": "openpath-linux",
+  "version": "1.0.0",
+  "description": "OpenPath VPN for Linux — native GUI + CLI with TLS obfuscation and HTTPS mimicry",
+  "private": true,
+  "main": "dist/main.js",
+  "bin": { "openpath": "./cli/dist/cli.js" },
+  "scripts": {
+    "dev": "npm run build && electron src/main.ts",
+    "build": "tsc -p tsconfig.json",
+    "build:cli": "tsc -p cli/tsconfig.json",
+    "build:gui": "vite build --config vite.config.ts",
+    "start": "electron dist/main.js",
+    "start:cli": "node cli/dist/cli.js --help",
+    "pack:deb": "electron-builder --linux deb --config electron-builder.yml",
+    "pack:rpm": "electron-builder --linux rpm --config electron-builder.yml",
+    "pack:appimage": "electron-builder --linux AppImage --config electron-builder.yml",
+    "pack:all": "electron-builder --linux deb rpm AppImage --config electron-builder.yml"
+  },
+  "dependencies": {
+    "ws": "^8.17.0",
+    "commander": "^11.1.0",
+    "conf": "^12.0.0",
+    "chalk": "^5.3.0",
+    "ora": "^7.0.1",
+    "inquirer": "^9.2.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "electron": "^29.0.0",
+    "electron-builder": "^24.9.0",
+    "vite": "^5.1.0",
+    "@vitejs/plugin-react": "^4.2.0",
+    "@types/node": "^20.11.0",
+    "@types/ws": "^8.5.10",
+    "tsx": "^4.7.0"
+  },
+  "build": {}
+}

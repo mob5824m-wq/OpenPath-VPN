@@ -1,0 +1,21 @@
+name: DuckDNS Schedule
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update DuckDNS
+        env:
+          DUCKDNS_DOMAIN: ${{ secrets.DUCKDNS_DOMAIN }}
+          DUCKDNS_TOKEN: ${{ secrets.DUCKDNS_TOKEN }}
+        run: |
+          if [ -z "$DUCKDNS_DOMAIN" ] || [ -z "$DUCKDNS_TOKEN" ]; then echo "No secrets - skip"; exit 0; fi
+          RESP=$(curl -fsS --max-time 15 "https://www.duckdns.org/update?domains=${DUCKDNS_DOMAIN}&token=${DUCKDNS_TOKEN}&verbose=true" || echo "KO")
+          echo "Response: $RESP"
+          if echo "$RESP" | grep -qi "OK"; then echo "DuckDNS OK $DUCKDNS_DOMAIN.duckdns.org"; else echo "::warning::$RESP"; fi
+          getent hosts "$DUCKDNS_DOMAIN.duckdns.org" || echo "DNS check done"

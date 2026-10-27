@@ -1,0 +1,24 @@
+services:
+  server:
+    build: ./
+    dockerfile: Dockerfile
+    ports:
+      - "4433:4433"
+    environment:
+      PORT: 4433
+      HOST: 0.0.0.0
+      DEMO_PSK: demo-student-key-do-not-use-prod
+      OPS_PATH: /ops
+      DECOY_TITLE: "Alex Rivera — Photography Portfolio"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4433/health"]
+      interval: 30s
+  web:
+    build:
+      context: ./client/web
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+      - "4173:4173"
+    depends_on: [server]
