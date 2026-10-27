@@ -36,8 +36,11 @@ for arg in "$@"; do case "$arg" in
   --docker) USE_DOCKER=1 ;;
   --psk=*) CUSTOM_PSK="${arg#--psk=}" ;;
   --port=*) CUSTOM_PORT="${arg#--port=}" ;;
+  --duckdns-domain=*) DUCKDNS_DOMAIN="${arg#--duckdns-domain=}" ;;
+  --duckdns-token=*) DUCKDNS_TOKEN="${arg#--duckdns-token=}" ;;
+  --no-duckdns) NO_DUCKDNS=1 ;;
   --open) OPEN_BROWSER=1 ;;
-  --help|-h) echo "Usage: ./setup.sh [--port=4433] [--psk=XXX] [--docker] [--no-build] [--open]"; exit 0 ;;
+  --help|-h) echo "Usage: ./setup.sh [--port=4433] [--psk=XXX] [--duckdns-domain=openpath42] [--duckdns-token=xxx] [--docker] [--no-build] [--open]"; exit 0 ;;
 esac; done
 [ -n "$CUSTOM_PORT" ] && PORT="$CUSTOM_PORT"
 
@@ -80,6 +83,35 @@ else
   log "\n[skip] --no-build, using existing server/dist" "$YELLOW"
 fi
 
+# helper: configure duckdns .env
+configure_duckdns() {
+  local domain="$1" token="$2" psk="$3" port="$4"
+  local envf="$ROOT/.env" example="$ROOT/.env.duckdns.example"
+  if [ ! -f "$envf" ] && [ -f "$example" ]; then cp "$example" "$envf"; fi
+  # set or update keys (portable, no -i differences)
+  upsert_env() { # $1=key $2=value $3=file
+    if grep -q "^$1=" "$3" 2>/dev/null; then
+      tmp=$(mktemp); sed "s|^$1=.*|$1=$2|" "$3" > "$tmp" && mv "$tmp" "$3"
+    else
+      echo "$1=$2" >> "$3"
+    fi
+  }
+  [ -n "$domain" ] && upsert_env "DUCKDNS_DOMAIN" "$domain" "$envf"
+  [ -n "$domain" ] && upsert_env "PUBLIC_URL" "wss://$domain.duckdns.org/ops" "$envf"
+  [ -n "$token" ] && upsert_env "DUCKDNS_TOKEN" "$token" "$envf"
+  [ -n "$token" ] && upsert_env "CADDY_DUCKDNS_TOKEN" "$token" "$envf"
+  [ -n "$psk" ] && upsert_env "DEMO_PSK" "$psk" "$envf"
+  upsert_env "PORT" "$port" "$envf"
+  upsert_env "OPS_PATH" "/ops" "$envf"
+  log "  DuckDNS .env written: $envf (DOMAIN=$domain)" "$GREEN"
+  if [ -n "$token" ] && [ -n "$domain" ] && [ -x "$ROOT/scripts/duckdns-update.sh" ]; then
+    log "  Updating DuckDNS IP for $domain.duckdns.org ..." "$CYAN"
+    DUCKDNS_DOMAIN="$domain" DUCKDNS_TOKEN="$token" bash "$ROOT/scripts/duckdns-update.sh" || log "  updater failed — run manually" "$YELLOW"
+  fi
+  log "  For TLS: docker compose -f docker-compose.duckdns.yml up -d" "$CYAN"
+  log "  For cron: sudo ./scripts/install-duckdns-cron.sh $domain <token>" "$CYAN"
+}
+
 # 4. PSK
 if [ -n "$CUSTOM_PSK" ]; then
   PSK="$CUSTOM_PSK"
@@ -98,6 +130,34 @@ else
 fi
 echo "$PSK" > "$ROOT/.psk" 2>/dev/null || true
 log "  Saved PSK to .psk (gitignored)" "$CYAN"
+
+# --- DuckDNS installer prompt ---
+# args already set DUCKDNS_DOMAIN/TOKEN if provided; allow env override
+DUCKDNS_DOMAIN="${DUCKDNS_DOMAIN:-${DOMAIN:-${DUCKDNS_DOMAIN_ENV:-}}}"
+DUCKDNS_TOKEN="${DUCKDNS_TOKEN:-${TOKEN:-}}"
+# also allow existing .env values
+if [ -z "$DUCKDNS_DOMAIN" ] && [ -f "$ROOT/.env" ]; then
+  DUCKDNS_DOMAIN=$(grep "^DUCKDNS_DOMAIN=" "$ROOT/.env" 2>/dev/null | cut -d= -f2 | tr -d '"'"'"" | xargs || true)
+  DUCKDNS_TOKEN=$(grep "^DUCKDNS_TOKEN=" "$ROOT/.env" 2>/dev/null | cut -d= -f2 | tr -d '"'"'"" | xargs || true)
+fi
+if [ -z "$NO_DUCKDNS" ] && [ -z "$DUCKDNS_DOMAIN" ] && [ -t 0 ]; then
+  echo ""
+  log "[DuckDNS] Want public URL https://YOURNAME.duckdns.org ? (free, FortiGate-friendly)" "$BOLD"
+  log "  Create at https://www.duckdns.org -> add domain -> copy token" "$CYAN"
+  printf "  DuckDNS domain (empty to skip, e.g., openpath42): "
+  read -r ans || true
+  if [ -n "$ans" ]; then
+    DUCKDNS_DOMAIN=$(echo "$ans" | sed 's/\.duckdns\.org//g' | xargs)
+    printf "  DuckDNS token: "
+    read -r tok || true
+    [ -n "$tok" ] && DUCKDNS_TOKEN="$tok"
+  fi
+fi
+if [ -n "$DUCKDNS_DOMAIN" ]; then
+  configure_duckdns "$DUCKDNS_DOMAIN" "$DUCKDNS_TOKEN" "$PSK" "$PORT"
+else
+  log "  Skipping DuckDNS (use --duckdns-domain=NAME --duckdns-token=TOKEN or docs/DUCKDNS.md)" "$CYAN"
+fi
 
 # pick port if busy
 if command -v ss >/dev/null 2>&1; then
@@ -158,5 +218,5 @@ if [ -n "$OPEN_BROWSER" ]; then
   (command -v open >/dev/null 2>&1 && open "http://localhost:$PORT/" &) || true
 fi
 
-export PORT HOST DEMO_PSK="$PSK" OPS_PATH="/ops" DECOY_TITLE="Alex Rivera — Photography Portfolio"
+export PORT HOST DEMO_PSK="$PSK" OPS_PATH="/ops" DECOY_TITLE="Alex Rivera — Photography Portfolio" DUCKDNS_DOMAIN="$DUCKDNS_DOMAIN" DUCKDNS_TOKEN="$DUCKDNS_TOKEN"
 exec node "$SERVER/dist/index.js"

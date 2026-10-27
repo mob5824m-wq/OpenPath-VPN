@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { PersistentNotification } from './components/PersistentNotification'
+import { FeaturesPanel } from './components/FeaturesPanel'
+import { ProfilesPanel } from './components/Profiles'
 
 async function buildAuthTokenAsync(psk: string, path='/ops'): Promise<string> {
   const ts = Date.now().toString();
@@ -230,12 +232,17 @@ export default function App(){
           <div style={{marginTop:12, fontSize:11, color:'#64748b'}}>Each sub host can run with its own DuckDNS: <code>setup-sub --main https://main.duckdns.org --duckdns-domain my-sub --duckdns-token xxx</code> → appears as <code>wss://my-sub.duckdns.org/ops</code> in list.</div>
         </div>
 
+        {/* Proton-parity Features (collapsible but default expanded) */}
+        <FeaturesPanel />
+        {/* Profiles (like Proton profiles: save server+features combos) */}
+        <ProfilesPanel />
+
         {/* Logs */}
         <div style={{background:'#0b1220', color:'#cbd5e1', borderRadius:12, padding:14, fontFamily:'JetBrains Mono, monospace', fontSize:11, maxHeight:220, overflow:'auto'}}>
           {logs.map((l,i)=><div key={i} style={{whiteSpace:'pre-wrap', lineHeight:1.5}}>{l}</div>)}
         </div>
 
-        <div style={{textAlign:'center', fontSize:11, color:'#94a3b8'}}>OpenPath VPN • Main + Subs • DuckDNS per host • GitHub releases auto-tag +0.1</div>
+        <div style={{textAlign:'center', fontSize:11, color:'#94a3b8'}}>OpenPath VPN • Proton feature parity ({new Date().getFullYear()}) • Main + Subs • DuckDNS per host • GitHub releases auto-tag +0.1</div>
       </div>
     </div>
   )

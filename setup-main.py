@@ -53,6 +53,9 @@ def main():
     ap.add_argument("--no-build", action="store_true")
     ap.add_argument("--docker", action="store_true")
     ap.add_argument("--open", action="store_true")
+    ap.add_argument("--duckdns-domain", default=None, help="DuckDNS domain (e.g., openpath42)")
+    ap.add_argument("--duckdns-token", default=None, help="DuckDNS token")
+    ap.add_argument("--no-duckdns", action="store_true")
     args=ap.parse_args()
 
     log(r"""
@@ -70,10 +73,38 @@ def main():
         if r.returncode!=0: run("npx tsc --outDir dist", cwd=SERVER)
     psk=args.psk or secrets.token_urlsafe(32)
     log(f"\n[4/5] PSK: {psk} (share with apps + subs)", GREEN)
+    # DuckDNS prompt for MAIN host (public URL)
+    duck_domain=args.duckdns_domain or os.environ.get("DUCKDNS_DOMAIN")
+    duck_token=args.duckdns_token or os.environ.get("DUCKDNS_TOKEN")
+    if not args.no_duckdns and not duck_domain and sys.stdin.isatty():
+        log("\n[DuckDNS] Public URL for MAIN? (free at https://www.duckdns.org)", BOLD)
+        ans=input("  DuckDNS domain (empty to skip): ").strip().replace(".duckdns.org","")
+        if ans:
+            duck_domain=ans
+            tok=input("  DuckDNS token: ").strip()
+            if tok: duck_token=tok
+    if duck_domain:
+        # write .env like setup.py
+        try:
+            envp=ROOT/".env"; ex=ROOT/".env.duckdns.example"
+            if not envp.exists() and ex.exists(): envp.write_text(ex.read_text())
+            c=envp.read_text() if envp.exists() else ""
+            import re
+            def up(k,v):
+                nonlocal c
+                if re.search(rf"^{k}=.*",c,re.M): c=re.sub(rf"^{k}=.*",f"{k}={v}",c,flags=re.M)
+                else: c+=f"\n{k}={v}\n"
+            up("DUCKDNS_DOMAIN",duck_domain); up("PUBLIC_URL",f"wss://{duck_domain}.duckdns.org/ops")
+            if duck_token: up("DUCKDNS_TOKEN",duck_token); up("CADDY_DUCKDNS_TOKEN",duck_token)
+            up("DEMO_PSK",psk); up("PORT",str(args.port or 4433))
+            envp.write_text(c); log(f"  DuckDNS .env written ({duck_domain}.duckdns.org)", GREEN)
+        except Exception as e: log(f"  DuckDNS .env fail: {e}", YELLOW)
     try: (ROOT/".psk").write_text(psk)
     except: pass
     port=args.port or pick_port(DEFAULT_PORT)
     host=args.host
+    duck_domain_py = locals().get('duck_domain')
+    duck_token_py = locals().get('duck_token')
     try: local_ip=socket.gethostbyname(socket.gethostname())
     except: local_ip="localhost"
     log("\n"+"="*62, GREEN)

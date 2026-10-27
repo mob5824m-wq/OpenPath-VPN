@@ -23,10 +23,14 @@ for %%a in (%*) do (
   echo %%a | findstr /b "--port=" >nul && set CUSTOM_PORT=%%a & set CUSTOM_PORT=!CUSTOM_PORT:--port=!
   echo %%a | findstr /b "--psk=" >nul && set CUSTOM_PSK=%%a & set CUSTOM_PSK=!CUSTOM_PSK:--psk=!
   if "%%a"=="--docker" set USE_DOCKER=1
+  echo %%a | findstr /b "--duckdns-domain=" >nul && set DUCKDNS_DOMAIN=%%a & set DUCKDNS_DOMAIN=!DUCKDNS_DOMAIN:--duckdns-domain=!
+  echo %%a | findstr /b "--duckdns-token=" >nul && set DUCKDNS_TOKEN=%%a & set DUCKDNS_TOKEN=!DUCKDNS_TOKEN:--duckdns-token=!
+  if "%%a"=="--no-duckdns" set NO_DUCKDNS=1
   if "%%a"=="--no-build" set NO_BUILD=1
   if "%%a"=="--open" set OPEN_BROWSER=1
   if "%%a"=="--help" goto :help
   if "%%a"=="-h" goto :help
+if "%%a"=="--help" goto :duckdns_help
 )
 if not "%CUSTOM_PORT%"=="" set PORT=%CUSTOM_PORT%
 
@@ -101,6 +105,25 @@ if not "%CUSTOM_PSK%"=="" (
 )
 REM save to .psk (gitignored)
 echo !PSK! > "%ROOT%.psk" 2>nul
+
+REM --- DuckDNS installer (Windows) ---
+if not defined NO_DUCKDNS if not defined DUCKDNS_DOMAIN (
+  echo.
+  echo [DuckDNS] Want public URL https://YOURNAME.duckdns.org ?
+  echo   Create at https://www.duckdns.org -^> add domain -^> copy token
+  set /p DUCKDNS_DOMAIN_INPUT="DuckDNS domain (empty to skip, e.g., openpath42): "
+  if not "!DUCKDNS_DOMAIN_INPUT!"=="" (
+    set DUCKDNS_DOMAIN=!DUCKDNS_DOMAIN_INPUT:.duckdns.org=!
+    set /p DUCKDNS_TOKEN="DuckDNS token: "
+  )
+)
+if defined DUCKDNS_DOMAIN (
+  echo DuckDNS .env: !DUCKDNS_DOMAIN!.duckdns.org
+  if exist "%ROOT%.env.duckdns.example" if not exist "%ROOT%.env" copy "%ROOT%.env.duckdns.example" "%ROOT%.env" >nul
+  powershell -Command "$f='%ROOT%.env'; $d='%DUCKDNS_DOMAIN%'; $tok='%DUCKDNS_TOKEN%'; $psk='%PSK%'; $port='%PORT%'; if(Test-Path $f){$c=Get-Content $f -Raw}else{$c=' '}; function up($k,$v){ if($c -match "^$k="){ $c=$c -replace "^$k=.*", "$k=$v" }else{ $c+="`n$k=$v" } }; up 'DUCKDNS_DOMAIN' $d; up 'PUBLIC_URL' "wss://$d.duckdns.org/ops"; if($tok){ up 'DUCKDNS_TOKEN' $tok; up 'CADDY_DUCKDNS_TOKEN' $tok }; up 'DEMO_PSK' $psk; up 'PORT' $port; up 'OPS_PATH' '/ops'; $c | Set-Content $f"
+  echo   DuckDNS .env written: %ROOT%.env
+  echo   For TLS: docker compose -f docker-compose.duckdns.yml up -d
+)
 
 REM local IP (best effort)
 set LOCAL_IP=localhost

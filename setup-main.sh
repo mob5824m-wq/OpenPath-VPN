@@ -19,7 +19,7 @@ cat <<'BANNER'
 BANNER
 log "Root: $ROOT  $(uname -s)" "$BOLD"
 CUSTOM_PORT=""; CUSTOM_PSK=""; CUSTOM_NAME=""; CUSTOM_REGION=""; NO_BUILD=""; OPEN_BROWSER=""
-for arg in "$@"; do case "$arg" in --port=*)CUSTOM_PORT="${arg#--port=}";; --psk=*)CUSTOM_PSK="${arg#--psk=}";; --name=*)CUSTOM_NAME="${arg#--name=}";; --region=*)CUSTOM_REGION="${arg#--region=}";; --no-build)NO_BUILD=1;; --open)OPEN_BROWSER=1;; --help|-h)echo "Usage: ./setup-main.sh [--port=4433] [--psk=XXX] [--name=MyMain] [--region=us-east] [--no-build] [--open]";exit 0;; esac; done
+for arg in "$@"; do case "$arg" in --port=*)CUSTOM_PORT="${arg#--port=}";; --psk=*)CUSTOM_PSK="${arg#--psk=}";; --name=*)CUSTOM_NAME="${arg#--name=}";; --region=*)CUSTOM_REGION="${arg#--region=}";; --no-build)NO_BUILD=1;; --duckdns-domain=*)DUCKDNS_DOMAIN="${arg#--duckdns-domain=}";; --duckdns-token=*)DUCKDNS_TOKEN="${arg#--duckdns-token=}";; --no-duckdns)NO_DUCKDNS=1;; --open)OPEN_BROWSER=1;; --help|-h)echo "Usage: ./setup-main.sh [--port=4433] [--psk=XXX] [--name=MyMain] [--region=us-east] [--no-build] [--open]";exit 0;; esac; done
 [ -n "$CUSTOM_PORT" ] && PORT="$CUSTOM_PORT"
 log "\n[1/5] Checking Node.js ..." "$BOLD"
 command -v node >/dev/null 2>&1 || { log "Node not found https://nodejs.org" "$RED"; exit 1; }
@@ -31,6 +31,13 @@ fi
 if [ -n "$CUSTOM_PSK" ]; then PSK="$CUSTOM_PSK"; log "\n[4/5] PSK: $PSK" "$GREEN"; else
   PSK=$(node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"); log "\n[4/5] Generated PSK: $PSK" "$GREEN"; fi
 echo "$PSK" > "$ROOT/.psk" 2>/dev/null || true
+# DuckDNS for MAIN
+if [ -z "$NO_DUCKDNS" ] && [ -z "$DUCKDNS_DOMAIN" ] && [ -t 0 ]; then
+  echo ""; log "[DuckDNS] Public URL for MAIN? (https://www.duckdns.org)" "$BOLD"; printf "  DuckDNS domain (empty to skip): "; read -r ans || true; if [ -n "$ans" ]; then DUCKDNS_DOMAIN=$(echo "$ans" | sed "s/\.duckdns\.org//g" | xargs); printf "  DuckDNS token: "; read -r tok || true; [ -n "$tok" ] && DUCKDNS_TOKEN="$tok"; fi; fi
+if [ -n "$DUCKDNS_DOMAIN" ]; then
+  envf="$ROOT/.env"; [ ! -f "$envf" ] && [ -f "$ROOT/.env.duckdns.example" ] && cp "$ROOT/.env.duckdns.example" "$envf"
+  upsert(){ if grep -q "^$1=" "$3" 2>/dev/null; then tmp=$(mktemp); sed "s|^$1=.*|$1=$2|" "$3" > "$tmp" && mv "$tmp" "$3"; else echo "$1=$2" >> "$3"; fi; };
+  upsert "DUCKDNS_DOMAIN" "$DUCKDNS_DOMAIN" "$envf"; upsert "PUBLIC_URL" "wss://$DUCKDNS_DOMAIN.duckdns.org/ops" "$envf"; [ -n "$DUCKDNS_TOKEN" ] && upsert "DUCKDNS_TOKEN" "$DUCKDNS_TOKEN" "$envf" && upsert "CADDY_DUCKDNS_TOKEN" "$DUCKDNS_TOKEN" "$envf"; upsert "DEMO_PSK" "$PSK" "$envf"; log "  DuckDNS .env written ($DUCKDNS_DOMAIN.duckdns.org)" "$GREEN"; fi
 if command -v ip >/dev/null 2>&1; then LOCAL_IP=$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'src \K[0-9.]+' | head -1); fi
 [ -z "$LOCAL_IP" ] && LOCAL_IP="localhost"
 log "\n==============================================================" "$GREEN"

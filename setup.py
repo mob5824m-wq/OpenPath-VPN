@@ -82,7 +82,59 @@ def pick_port(preferred=DEFAULT_PORT):
         s2.close()
         return p
 
-def print_info(port, psk, host="localhost"):
+
+def configure_duckdns(domain, token, psk, port):
+    """Write .env for DuckDNS, update Caddy, run duckdns-update.sh if present. Called by installer."""
+    env_path = ROOT / ".env"
+    example = ROOT / ".env.duckdns.example"
+    # merge example -> .env if missing
+    try:
+        if not env_path.exists() and example.exists():
+            env_path.write_text(example.read_text())
+        content = env_path.read_text() if env_path.exists() else ""
+        # replace placeholders
+        def set_env(k,v):
+            nonlocal content
+            if not content:
+                content = f"{k}={v}\n"
+                return
+            import re
+            if re.search(rf"^{k}=.*", content, re.M):
+                content = re.sub(rf"^{k}=.*", f"{k}={v}", content, flags=re.M)
+            else:
+                content += f"\n{k}={v}\n"
+        if domain:
+            set_env("DUCKDNS_DOMAIN", domain)
+            set_env("PUBLIC_URL", f"wss://{domain}.duckdns.org/ops")
+        if token:
+            set_env("DUCKDNS_TOKEN", token)
+            set_env("CADDY_DUCKDNS_TOKEN", token)
+        if psk:
+            set_env("DEMO_PSK", psk)
+        set_env("PORT", str(port))
+        set_env("OPS_PATH", "/ops")
+        env_path.write_text(content)
+        log(f"  DuckDNS .env written: {env_path} (DOMAIN={domain})", GREEN)
+    except Exception as e:
+        log(f"  DuckDNS .env write failed: {e}", YELLOW)
+    # try one-shot IP update if script+token present
+    updater = ROOT / "scripts" / "duckdns-update.sh"
+    if token and domain and updater.exists():
+        try:
+            log(f"  Updating DuckDNS IP for {domain}.duckdns.org ...", CYAN)
+            import subprocess
+            env2 = os.environ.copy(); env2["DUCKDNS_DOMAIN"]=domain; env2["DUCKDNS_TOKEN"]=token
+            subprocess.run(["bash", str(updater)], env=env2, timeout=15)
+            log(f"  DuckDNS update attempted — check DuckDNS dashboard", GREEN)
+        except Exception as e:
+            log(f"  DuckDNS updater error: {e} (you can run scripts/duckdns-update.sh manually)", YELLOW)
+    # hint for systemd / Caddy
+    if domain:
+        log(f"  For auto-TLS: docker compose -f docker-compose.duckdns.yml up -d", CYAN)
+        log(f"  Or: caddy run --config Caddyfile.duckdns --adapter caddyfile (see docs/DUCKDNS.md)", CYAN)
+        log(f"  For auto IP refresh: sudo ./scripts/install-duckdns-cron.sh {domain} {token[:8]}***", CYAN)
+
+def print_info(port, psk, host="localhost"):def print_info(port, psk, host="localhost"):
     ws_url = f"wss://{host}:{port}/ops?psk={psk}&user=demo"
     # openpath URI format used by clients
     uri = f"openpath://{host}:{port}/ops?psk={psk}&user=demo#demo"
@@ -120,6 +172,9 @@ def main():
     ap.add_argument("--no-build", action="store_true", help="Skip npm install/build (use existing dist)")
     ap.add_argument("--docker", action="store_true", help="Use docker compose instead of node")
     ap.add_argument("--open", action="store_true", help="Open health URL in browser after start")
+    ap.add_argument("--duckdns-domain", default=None, help="DuckDNS domain without suffix (e.g., openpath42)")
+    ap.add_argument("--duckdns-token", default=None, help="DuckDNS token from duckdns.org")
+    ap.add_argument("--no-duckdns", action="store_true", help="Skip DuckDNS interactive prompt")
     args = ap.parse_args()
 
     log(r"""
@@ -151,6 +206,40 @@ def main():
     port = args.port or pick_port(DEFAULT_PORT)
     host = args.host
 
+    # --- DuckDNS interactive configuration (installer configures duckdns) ---
+    duck_domain = args.duckdns_domain or os.environ.get("DUCKDNS_DOMAIN") or os.environ.get("DOMAIN")
+    duck_token = args.duckdns_token or os.environ.get("DUCKDNS_TOKEN") or os.environ.get("TOKEN")
+    if not args.no_duckdns and not duck_domain:
+        # if interactive tty, ask
+        try:
+            is_tty = sys.stdin.isatty()
+        except: is_tty=False
+        if is_tty:
+            log("\n[DuckDNS] Want a public URL like https://YOURNAME.duckdns.org ? (makes Fortinet bypass easier)", BOLD)
+            log("  Create free domain at https://www.duckdns.org (login -> add domain -> copy token)", CYAN)
+            ans = input("  DuckDNS domain (leave empty to skip, e.g., openpath42): ").strip()
+            if ans:
+                duck_domain = ans.strip().replace(".duckdns.org","").strip()
+                try:
+                    tok = input("  DuckDNS token (from duckdns.org top of page): ").strip()
+                    if tok: duck_token = tok
+                except: pass
+        except: pass
+    if duck_domain:
+        if not duck_token:
+            # try read from existing .env
+            try:
+                envtxt = (ROOT/".env").read_text()
+                import re
+                m=re.search(r"DUCKDNS_TOKEN=(.*)",envtxt)
+                if m: duck_token=m.group(1).strip()
+            except: pass
+        if duck_token and "replace" in duck_token.lower():
+            log(f"  Warning: DuckDNS token still placeholder, update .env", YELLOW)
+        configure_duckdns(duck_domain, duck_token or "", psk, port)
+    else:
+        log(f"\n  Skipping DuckDNS (use --duckdns-domain/--duckdns-token or docs/DUCKDNS.md for public URL)", CYAN)
+
     # quick check dist exists
     if not (SERVER / "dist" / "index.js").exists():
         log(f"  server/dist/index.js missing — build may have failed", RED)
@@ -169,6 +258,9 @@ def main():
     env["HOST"] = host
     env["DEMO_PSK"] = psk
     env["OPS_PATH"] = "/ops"
+    if 'duck_domain' in locals() and duck_domain:
+        env["DUCKDNS_DOMAIN"] = duck_domain
+        if 'duck_token' in locals() and duck_token: env["DUCKDNS_TOKEN"] = duck_token
     env["DECOY_TITLE"] = "Alex Rivera — Photography Portfolio"
 
     log(f"\n[5/5] Starting server on {host}:{port}  (Ctrl+C to stop)\n", BOLD)

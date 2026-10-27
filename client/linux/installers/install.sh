@@ -61,3 +61,26 @@ echo "  openpath connect --server wss://cdn.yourdomain.com/ops"
 echo "  openpath status"
 echo "  openpath-gui  # or launcher: OpenPath VPN"
 echo "See client/linux/README.md for full guide."
+
+# --- DuckDNS configuration (installer configures duckdns) ---
+echo ""
+echo "→ DuckDNS public URL (optional): for a stable wss://YOURNAME.duckdns.org/ops"
+echo "  Create free at https://www.duckdns.org → add domain → copy token"
+if [ -t 0 ]; then
+  read -p "  DuckDNS domain (empty to skip): " DD_DOMAIN || true
+  if [ -n "$DD_DOMAIN" ]; then
+    DD_DOMAIN=$(echo "$DD_DOMAIN" | sed 's/\.duckdns\.org//g' | xargs)
+    read -p "  DuckDNS token: " DD_TOKEN || true
+    if [ -n "$DD_TOKEN" ] && [ -n "$DD_DOMAIN" ]; then
+      echo "DUCKDNS_DOMAIN=$DD_DOMAIN" | sudo tee /etc/openpath/duckdns.env >/dev/null 2>&1 || echo "DUCKDNS_DOMAIN=$DD_DOMAIN" > /tmp/openpath-duckdns.env
+      echo "DUCKDNS_TOKEN=$DD_TOKEN" | sudo tee -a /etc/openpath/duckdns.env >/dev/null 2>&1 || echo "DUCKDNS_TOKEN=$DD_TOKEN" >> /tmp/openpath-duckdns.env
+      # write .env in repo if present
+      if [ -f ".env.duckdns.example" ]; then cp .env.duckdns.example .env 2>/dev/null || true; fi
+      if [ -f ".env" ]; then sed -i "s/^DUCKDNS_DOMAIN=.*/DUCKDNS_DOMAIN=$DD_DOMAIN/" .env 2>/dev/null || echo "DUCKDNS_DOMAIN=$DD_DOMAIN" >> .env; sed -i "s/^DUCKDNS_TOKEN=.*/DUCKDNS_TOKEN=$DD_TOKEN/" .env 2>/dev/null || echo "DUCKDNS_TOKEN=$DD_TOKEN" >> .env; fi
+      echo "✓ DuckDNS configured: $DD_DOMAIN.duckdns.org — run: ./scripts/duckdns-update.sh && sudo ./scripts/install-duckdns-cron.sh $DD_DOMAIN $DD_TOKEN"
+      if command -v bash >/dev/null && [ -f "./scripts/duckdns-update.sh" ]; then DUCKDNS_DOMAIN="$DD_DOMAIN" DUCKDNS_TOKEN="$DD_TOKEN" bash "./scripts/duckdns-update.sh" || true; fi
+    fi
+  else
+    echo "  Skipped DuckDNS — you can set later: sudo nano /etc/openpath/duckdns.env or .env"
+  fi
+fi
