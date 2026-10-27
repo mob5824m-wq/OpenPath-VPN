@@ -40,15 +40,17 @@ export function validateAuth(url: URL, ip: string): AuthResult {
   if (nonceCache.has(nonce)) return recordBad(ip, 'replay');
   if (nonce.length < 8) return recordBad(ip, 'bad-nonce');
 
-  // Expected HMAC: HMAC-SHA256(psk, `${ts}.${nonce}.${config.opsPath}`)
-  const expected = createHmac('sha256', psk).update(`${ts}.${nonce}.${config.opsPath}`).digest('hex');
-
+  // Expected HMAC: HMAC-SHA256(psk, `${ts}.${nonce}.${path}`) — accept either opsPath or fastPath (+ plain /ops fallback)
+  const pathsToTry = [config.opsPath, config.fastPath, '/ops'];
   let ok = false;
-  try {
-    const a = Buffer.from(clientHmac, 'hex');
-    const b = Buffer.from(expected, 'hex');
-    ok = a.length === b.length && timingSafeEqual(a,b);
-  } catch { ok = false; }
+  for (const p of pathsToTry) {
+    const expected = createHmac('sha256', psk).update(`${ts}.${nonce}.${p}`).digest('hex');
+    try {
+      const a = Buffer.from(clientHmac, 'hex');
+      const b = Buffer.from(expected, 'hex');
+      if (a.length === b.length && timingSafeEqual(a,b)) { ok = true; break; }
+    } catch {}
+  }
 
   if (!ok) return recordBad(ip, 'bad-hmac');
 

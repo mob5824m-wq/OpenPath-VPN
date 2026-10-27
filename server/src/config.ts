@@ -14,9 +14,9 @@ export const config = {
       if (process.env.OPSK) return JSON.parse(process.env.OPSK);
     } catch {}
     return {
-      // demo user — change in production! Generate via npm run gen-psk
-      demo: process.env.DEMO_PSK || 'DEMO_PSK_REPLACE_ME_32B_BASE64URL',
-      student: process.env.STUDENT_PSK || 'demo-student-key-do-not-use-prod',
+      // demo user — in demo both demo/student share same PSK so web default works
+      demo: process.env.DEMO_PSK || process.env.STUDENT_PSK || 'demo-student-key-do-not-use-prod',
+      student: process.env.STUDENT_PSK || process.env.DEMO_PSK || 'demo-student-key-do-not-use-prod',
     };
   })() as Record<string, string>,
   opsPath: process.env.OPS_PATH || '/ops',

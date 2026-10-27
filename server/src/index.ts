@@ -127,8 +127,9 @@ server.on('upgrade', (req, socket, head)=>{
 wss.on('connection', (ws: WebSocket, req: any, user: string)=>{
   const session = createSession(ws, user);
   console.log(`[connect] user=${user} id=${session.id} ua=${req.headers['user-agent']?.slice(0,60)}`);
-  const hello = Buffer.from(JSON.stringify({ t:'hello', id: session.id, user, serverTime: Date.now(), transports:['wss','h2','doh'] }));
-  ws.send(encryptFrame(session, hello, FrameType.DATA));
+  // hello sent as plain JSON for web demo (client has no AES key yet) + encrypted variant optional
+  const hello = Buffer.from(JSON.stringify({ t:'hello', id: session.id, user, serverTime: Date.now(), transports:['wss','h2','doh'], mode:'stealth' }));
+  ws.send(hello);
 
   let alive = true;
   const pingInterval = setInterval(()=>{
