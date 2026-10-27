@@ -1,0 +1,10 @@
+// Placeholder — open in Android Studio for full build
+// See client/android/README.md for gomobile AAR steps
+plugins { id 'com.android.application' }
+android {
+  compileSdk 34
+  defaultConfig { applicationId "com.openpath.vpn"; minSdk 26; targetSdk 34; versionCode 1; versionName "1.0.0" }
+  buildTypes { release { minifyEnabled false } }
+}
+dependencies { implementation files('libs/openpath.aar') }
+ // ./gradlew assembleRelease → app/build/outputs/apk/release/app-release.apk

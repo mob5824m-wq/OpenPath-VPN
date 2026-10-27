@@ -1,0 +1,15 @@
+services:
+  server:
+    build: ./
+    dockerfile: Dockerfile
+    environment:
+      PORT: 4433
+      HOST: 0.0.0.0
+      DEMO_PSK: ${DEMO_PSK:-change-me}
+    expose: ["4433"]
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN}
+    depends_on: [server]

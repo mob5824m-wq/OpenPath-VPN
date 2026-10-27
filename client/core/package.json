@@ -1,0 +1,19 @@
+{
+  "name": "openpath-core",
+  "version": "1.0.0",
+  "description": "OpenPath Stealth Protocol core — shared by all platforms",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "build": "tsc --outDir dist",
+    "test": "node --loader tsx src/__tests__/protocol.test.ts"
+  },
+  "dependencies": {
+    "ws": "^8.17.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "tsx": "^4.7.0",
+    "@types/node": "^20.11.0"
+  }
+}

@@ -1,0 +1,29 @@
+appId: com.openpath.vpn.linux
+productName: OpenPath VPN
+artifactName: "${productName}-${version}-${os}-${arch}.${ext}"
+directories:
+  output: dist-installer
+  buildResources: installers
+files:
+  - dist/**
+  - cli/dist/**
+  - installers/**
+  - package.json
+linux:
+  category: Network
+  maintainer: OpenPath Team <team@openpath.vpn>
+  target: [deb, rpm, AppImage]
+  icon: installers/icon.png
+  desktop:
+    Name: OpenPath VPN
+    Comment: Stealth VPN that looks like HTTPS • TLS inside 443
+    StartupWMClass: openpath
+  executableName: openpath-gui
+deb:
+  depends: [libnss3, libxss1, libasound2, libxtst6]
+rpm:
+  depends: [nss, libXScrnSaver, alsa-lib]
+appImage:
+  artifactName: "OpenPath-${version}.AppImage"
+nsis: {}
+dmg: {}

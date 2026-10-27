@@ -1,0 +1,23 @@
+appId: com.openpath.vpn
+productName: OpenPath VPN
+artifactName: "${productName}-${version}-${os}-${arch}.${ext}"
+directories: { output: dist-installer, buildResources: ../linux/installers }
+files: [electron/**, ../web/dist/**, ../core/dist/**, package.json]
+win:
+  target: [nsis, zip]
+  icon: ../linux/installers/icon.png
+  publisherName: OpenPath
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+mac:
+  target: [dmg, zip]
+  category: public.app-category.networking
+  icon: ../linux/installers/icon.png
+linux:
+  target: [deb, rpm, AppImage]
+  category: Network
+  icon: ../linux/installers/icon.png
+dmg: { sign: false }
+deb: { depends: [libnss3, libxss1, libasound2] }

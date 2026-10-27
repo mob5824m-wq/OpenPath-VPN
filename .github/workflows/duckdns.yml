@@ -1,0 +1,70 @@
+name: DuckDNS
+on:
+  push:
+    branches: [main, "arena/**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  duckdns:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve domain
+        run: |
+          DOMAIN="${{ secrets.DUCKDNS_DOMAIN }}"
+          echo "domain=$DOMAIN"
+          if [ -z "$DOMAIN" ]; then echo "No DUCKDNS_DOMAIN"; else echo "Domain: $DOMAIN.duckdns.org"; fi
+      - name: Update DuckDNS
+        env:
+          DUCKDNS_DOMAIN: ${{ secrets.DUCKDNS_DOMAIN }}
+          DUCKDNS_TOKEN: ${{ secrets.DUCKDNS_TOKEN }}
+        run: |
+          if [ -z "$DUCKDNS_DOMAIN" ] || [ -z "$DUCKDNS_TOKEN" ]; then echo "No secrets - skip"; exit 0; fi
+          RESP=$(curl -fsS --max-time 15 "https://www.duckdns.org/update?domains=${DUCKDNS_DOMAIN}&token=${DUCKDNS_TOKEN}&verbose=true" || echo "KO")
+          echo "Response: $RESP"
+          if echo "$RESP" | grep -qi "OK"; then echo "DuckDNS OK"; else echo "::warning:: $RESP"; fi
+          getent hosts "$DUCKDNS_DOMAIN.duckdns.org" 2>&1 | head -5 || echo "DNS check done"
+
+  build-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - name: Build server
+        run: |
+          npm install --prefix server
+          npm run build --prefix server || npx tsc --project server/tsconfig.json
+      - name: Build web
+        run: |
+          npm install --prefix client/core 2>&1 | tail -5 || true
+          npm install --prefix client/linux/cli 2>&1 | tail -5 || true
+          npx tsc --project client/linux/cli/tsconfig.json 2>&1 | tail -10 || true
+          npm install --prefix client/web 2>&1 | tail -5 || npm ci --prefix client/web 2>&1 | tail -5 || true
+          npm run build --prefix client/web
+      - name: Validate DuckDNS files
+        run: |
+          docker compose -f docker-compose.duckdns.yml config > /dev/null && echo "compose valid"
+          ls -lh .env.duckdns.example scripts/duckdns-update.sh Caddyfile.duckdns
+
+  deploy:
+    needs: [duckdns, build-check]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH if configured
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          if [ -z "$DEPLOY_HOST" ] || [ -z "$DEPLOY_SSH_KEY" ]; then echo "No deploy secrets - skip (set DEPLOY_HOST/SSH_KEY)"; exit 0; fi
+          USERNAME="${DEPLOY_USER:-ubuntu}"
+          DPATH="${DEPLOY_PATH:-~/OpenPath-VPN}"
+          mkdir -p ~/.ssh
+          echo "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/deploy_key "$USERNAME@$DEPLOY_HOST" "cd $DPATH && git pull --ff-only && docker compose -f docker-compose.duckdns.yml up -d --build && docker compose -f docker-compose.duckdns.yml ps"

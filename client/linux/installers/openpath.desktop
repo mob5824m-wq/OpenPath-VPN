@@ -1,0 +1,20 @@
+[Desktop Entry]
+Name=OpenPath VPN
+Comment=Stealth VPN that looks like HTTPS — TLS over TCP :443
+Exec=openpath-gui
+Icon=openpath
+Terminal=false
+Type=Application
+Categories=Network;Security;
+Keywords=VPN;proxy;privacy;stealth;TLS;
+StartupNotify=true
+StartupWMClass=openpath
+Actions=Connect;Disconnect;
+
+[Desktop Action Connect]
+Name=Connect stealth tunnel
+Exec=openpath connect
+
+[Desktop Action Disconnect]
+Name=Disconnect
+Exec=openpath disconnect

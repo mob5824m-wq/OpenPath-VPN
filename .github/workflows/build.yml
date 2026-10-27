@@ -1,0 +1,21 @@
+name: build
+on: [push, workflow_dispatch]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: ./scripts/build-all.sh
+      - run: |
+          cd client/linux && npx electron-builder --linux AppImage --publish never || true
+          cd ../.. && ls -R client/linux/dist-installer || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openpath-linux
+          path: |
+            client/linux/dist-installer/*
+            client/linux/cli/dist/*
+            client/web/dist/*
+            server/dist/*

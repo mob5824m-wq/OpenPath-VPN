@@ -1,0 +1,50 @@
+# Caddyfile for DuckDNS host — automatic Let's Encrypt
+# Usage:
+#   DUCKDNS_DOMAIN=openpath42 docker compose -f docker-compose.duckdns.yml up -d
+#   Caddy auto-requests cert for openpath42.duckdns.org via HTTP-01 (port 80).
+#   For DNS-01 (no port 80), build caddy with duckdns DNS provider: see docker-compose.duckdns.yml
+#
+# This file is templated: ${DUCKDNS_DOMAIN} is substituted via envsubst in the entrypoint
+# For plain Caddy binary installs, replace DUCKDNS_DOMAIN manually.
+
+{$DUCKDNS_DOMAIN}.duckdns.org {
+	tls {
+		# HTTP-01 is default. For DNS-01 uncomment next lines and build caddy with duckdns plugin:
+		# dns duckdns {env.CADDY_DUCKDNS_TOKEN}
+	}
+
+	# Security headers — look like a normal personal site, not a VPN
+	header {
+		X-Frame-Options "SAMEORIGIN"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# Hide Caddy signature a bit
+		-Server
+	}
+
+	# Logging
+	log {
+		output stdout
+		format console
+		level INFO
+	}
+
+	# Standard site — decoy handled by OpenPath server on :4433, but we also serve 404s gracefully
+	# Proxy all to Node server
+	reverse_proxy server:4433 {
+		header_up Host {host}
+		header_up X-Real-IP {remote}
+		header_up X-Forwarded-Proto {scheme}
+		# WebSocket upgrades
+		header_up Connection {>Connection}
+		header_up Upgrade {>Upgrade}
+	}
+
+	# ACME HTTP-01 needs /.well-known/acme-challenge to not be proxied? Caddy handles it automatically
+}
+
+# Also proxy www subdomain if you create a CNAME
+# www.{$DUCKDNS_DOMAIN}.duckdns.org handled same as above via:
+# www.{$DUCKDNS_DOMAIN}.duckdns.org {
+#   redir https://{$DUCKDNS_DOMAIN}.duckdns.org{uri}
+# }
