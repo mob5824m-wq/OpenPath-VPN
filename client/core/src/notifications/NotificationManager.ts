@@ -1,7 +1,7 @@
 import { NotificationPayload, VpnStatus, TransferStats, formatBytes, formatSpeed, formatDuration } from "./types";
 
 /**
- * Cross-platform persistent notification manager (always-present like Proton).
+ * Cross-platform OS notification manager (connect / disconnect / status).
  *
  * Platform adapters:
  *  - Android: ForegroundService + NotificationCompat ongoing:true, actions Disconnect
@@ -95,13 +95,13 @@ export abstract class BaseNotificationManager {
   }
 }
 
-// ---- Web fallback (in-app banner, matches screenshot for preview) ----
+// ---- Web (browser Notification API via window events) ----
 export class WebNotificationManager extends BaseNotificationManager {
   private el: HTMLElement | null = null;
 
   show(p: NotificationPayload) {
     console.log("[notification] show", p);
-    // web banner is rendered via React PersistentNotification component — no DOM here
+    // web uses the browser Notification API — no DOM work here
     // this class logs; actual web UI subscribes via window events
     if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("openpath:notification", { detail: p }));
   }
@@ -123,7 +123,7 @@ export class ElectronNotificationManager extends BaseNotificationManager {
       // @ts-ignore
       (window as any).openpathLinux.notifyShow(p);
     }
-    // also dispatch web event for in-app preview
+    // notify any renderer listener (no in-app banner is rendered by the app)
     if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("openpath:notification", { detail: p }));
   }
   update(p: NotificationPayload) {

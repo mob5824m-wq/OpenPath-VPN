@@ -46,8 +46,8 @@ export function FeaturesPanel() {
         style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 16px", cursor: "pointer", background: "#f8fafc", borderBottom: expanded ? "1px solid #e2e8f0" : "none" }}
       >
         <div>
-          <h3 style={{ margin: 0, fontSize: 15 }}>Proton Parity — All Features <span style={{ color: "#64748b", fontWeight: 400, fontSize: 11 }}>({featuresCatalog.length} — click to toggle)</span></h3>
-          <p style={{ margin: "4px 0 0", fontSize: 11, color: "#64748b" }}>Full ProtonVPN parity: Secure Core, NetShield, Tor, Smart Protocol, VPN Accelerator, Split Tunnel, etc. Toggleable features saved locally.</p>
+          <h3 style={{ margin: 0, fontSize: 15 }}>All Features <span style={{ color: "#64748b", fontWeight: 400, fontSize: 11 }}>({featuresCatalog.length} — click to toggle)</span></h3>
+          <p style={{ margin: "4px 0 0", fontSize: 11, color: "#64748b" }}>Everything OpenPath supports: Secure Core, NetShield, Tor, Smart Protocol, VPN Accelerator, Split Tunnel, etc. Toggleable features saved locally.</p>
         </div>
         <span style={{ fontSize: 12, background: "#e0f2fe", padding: "4px 10px", borderRadius: 999 }}>{expanded ? "▼ Collapse" : "▶ Expand"}</span>
       </div>
@@ -67,7 +67,7 @@ export function FeaturesPanel() {
                 <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
                   <div style={{ fontSize: 18 }}>{f.icon}</div>
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 700, fontSize: 12 }}>{f.name} <span style={{ fontSize: 9, color: "#94a3b8", fontWeight: 400 }}>· {f.protonEquivalent}</span> {f.infoOnly && <span style={{ fontSize: 9, background: "#ecfdf5", border: "1px solid #a7f3d0", padding: "1px 5px", borderRadius: 999, color: "#059669" }}>always-on</span>}</div>
+                    <div style={{ fontWeight: 700, fontSize: 12 }}>{f.name} <span style={{ fontSize: 9, color: "#94a3b8", fontWeight: 400 }}>· {f.equivalent}</span> {f.infoOnly && <span style={{ fontSize: 9, background: "#ecfdf5", border: "1px solid #a7f3d0", padding: "1px 5px", borderRadius: 999, color: "#059669" }}>always-on</span>}</div>
                     <div style={{ fontSize: 11, color: "#475569", lineHeight: 1.4, marginTop: 2 }}>{f.description}</div>
                   </div>
                 </div>
@@ -114,7 +114,7 @@ export function FeaturesPanel() {
                     </select>
                   )}
                   {f.infoOnly && (
-                    <div style={{ fontSize: 10, color: "#059669", background: "#ecfdf5", padding: "4px 8px", borderRadius: 8, border: "1px solid #a7f3d0" }}>✓ Active — {f.protonEquivalent}</div>
+                    <div style={{ fontSize: 10, color: "#059669", background: "#ecfdf5", padding: "4px 8px", borderRadius: 8, border: "1px solid #a7f3d0" }}>✓ Active — {f.equivalent}</div>
                   )}
                 </div>
 
@@ -128,7 +128,7 @@ export function FeaturesPanel() {
 
           <div style={{ marginTop: 12, background: "#0f172a", color: "#e2e8f0", borderRadius: 12, padding: 12, fontSize: 11, lineHeight: 1.6 }}>
             <div style={{ fontWeight: 700 }}>Active summary — {cfg.netShield === 0 ? "No NetShield" : cfg.netShield === 1 ? "Malware block" : "Full Ad-block"} • Kill Switch: {cfg.killSwitch} • Secure Core: {cfg.secureCore ? "On 🇮🇸→🇨🇭" : "Off"} • Tor: {cfg.torOverVPN ? "On 🧅" : "Off"} • Split: {cfg.splitTunnel.mode} • Accelerator: {cfg.vpnAccelerator ? "On 🚀" : "Off"} • SmartProto: {cfg.smartProtocol ? "Auto" : "Off"} • AltRouting: {cfg.alternativeRouting ? "On" : "Off"} • FortiGate: {cfg.stealth ? "GhostPath" : "plain"} • 2FA: {cfg.twoFactor ? "On" : "Off"}</div>
-            <div style={{ color: "#94a3b8", marginTop: 4 }}>Stored in localStorage <code>openpath:features</code> + per-profile. Export/import in Profiles panel. Mirrors Proton’s features/protonvpn.com/features.</div>
+            <div style={{ color: "#94a3b8", marginTop: 4 }}>Stored in localStorage <code>openpath:features</code> + per-profile. Export/import in Profiles panel. Enable or disable exactly what this app provides.</div>
           </div>
         </div>
       )}

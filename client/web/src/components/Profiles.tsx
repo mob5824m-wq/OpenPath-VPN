@@ -43,7 +43,7 @@ export function ProfilesPanel({ onSelect }: { onSelect?: (p: Profile) => void })
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h3 style={{ margin: 0 }}>Profiles <span style={{ color: "#64748b", fontWeight: 400, fontSize: 13 }}>(Proton-like: Quick Connect, Streaming, P2P, Tor, Secure Core)</span></h3>
+        <h3 style={{ margin: 0 }}>Profiles <span style={{ color: "#64748b", fontWeight: 400, fontSize: 13 }}>(profile: Quick Connect, Streaming, P2P, Tor, Secure Core)</span></h3>
         <button className="btn btn-primary" style={{ padding: "8px 12px", fontSize: 12 }} onClick={() => setShowCreate(!showCreate)}>{showCreate ? "Cancel" : "+ Create Profile"}</button>
       </div>
 

@@ -1,6 +1,6 @@
 # Persistent Notification (Always-Present)
 
-Mimics Proton VPN screenshot: `Connected to Canada — ↓ 100.94 MB | 2.16 KB/s ↑ 22.14 MB | 2.74 KB/s — Disconnect — always in notification shade / menu bar / tray`.
+Mimics OpenPath VPN screenshot: `Connected to Canada — ↓ 100.94 MB | 2.16 KB/s ↑ 22.14 MB | 2.74 KB/s — Disconnect — always in notification shade / menu bar / tray`.
 
 - `types.ts` — payload, formatters, countries.
 - `NotificationManager.ts` — `BaseNotificationManager` + platform adapters (`WebNotificationManager`, `ElectronNotificationManager`, Android `NotificationService`, iOS Live Activity, Windows Action Center, macOS NSUserNotification, Linux libnotify).

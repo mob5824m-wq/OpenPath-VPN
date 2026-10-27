@@ -3,7 +3,7 @@ import path from 'path';
 
 /**
  * Desktop (Windows/macOS/Linux) persistent notification — Electron side
- * Always-present like Proton VPN screenshot: Connected to Canada + ↓↑ stats + Disconnect action
+ * System notification shown on connect: Connected to Canada + ↓↑ stats + Disconnect action
  * Uses:
  *  - Windows: ToastNotificationManager scenario:reminder (stays in Action Center)
  *  - macOS: UNUserNotification persistent banner
@@ -51,13 +51,6 @@ export class PersistentNotification {
       if (idx === 1) { this.win?.show(); this.win?.focus(); }
     });
     this.notif.on('click', () => { this.win?.show(); this.win?.focus(); });
-    // Re-show if user dismisses while still connected (like Proton — always present)
-    this.notif.on('close', () => {
-      // if still connected, re-post after 2s
-      setTimeout(() => {
-        if ((global as any)._openpathConnected) this.showConnected(opts);
-      }, 2000);
-    });
     (global as any)._openpathConnected = true;
     this.notif.show();
 
@@ -66,14 +59,12 @@ export class PersistentNotification {
     app?.setBadgeCount?.(1);
   }
 
-  update(opts: { rxMB: string; rxSpeed: string; txMB: string; txSpeed: string; ip?: string }) {
-    // Electron notifications can't update in-place on all OS — we replace
-    this.showConnected({
-      country: (global as any)._openpathCountry || 'Canada',
-      flag: (global as any)._openpathFlag || '🇨🇦',
-      rxMB: opts.rxMB, rxSpeed: opts.rxSpeed, txMB: opts.txMB, txSpeed: opts.txSpeed,
-      ip: opts.ip,
-    });
+  update(_opts: { rxMB: string; rxSpeed: string; txMB: string; txSpeed: string; ip?: string }) {
+    // System notifications cannot be updated in place on every platform, and re-posting
+    // them every second would spam the user. The notification stays posted once from
+    // showConnected(); live stats live in the tray tooltip / overlay instead.
+    if (!(global as any)._openpathConnected) return;
+    try { app?.setBadgeCount?.(1); } catch {}
   }
 
   hide() {

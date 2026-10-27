@@ -1,5 +1,4 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { PersistentNotification } from './components/PersistentNotification'
 
 async function buildAuthTokenAsync(psk: string, path='/ops'): Promise<string> {
   const ts = Date.now().toString();
@@ -77,7 +76,7 @@ function fireSystemNotification(title:string, body:string, icon?:string){
     // Request permission if needed (will be done elsewhere, but try)
     if(typeof Notification !== 'undefined' && Notification.permission === 'granted'){
       const n = new Notification(title, { body, icon: icon||'/favicon.png', tag:'openpath-vpn', silent:false, requireInteraction:false } as any)
-      // auto close after 6s like Proton persistent but not permanent
+      // auto close after 6s — system notification only, no in-app banner
       setTimeout(()=>{ try{ n.close() }catch{} },6000)
       n.onclick = ()=>{ window.focus(); try{ n.close() }catch{} }
     } else if(typeof Notification !== 'undefined' && Notification.permission !== 'denied'){
@@ -89,17 +88,53 @@ function fireSystemNotification(title:string, body:string, icon?:string){
 }
 
 const COUNTRIES = [
-  { code:'CA', name:'Canada', flag:'🇨🇦', cities:['Toronto','Montreal','Vancouver'], load:32, p2p:true, tor:true },
-  { code:'US', name:'United States', flag:'🇺🇸', cities:['New York','Los Angeles','Chicago'], load:41 },
-  { code:'GB', name:'United Kingdom', flag:'🇬🇧', cities:['London'], load:28 },
-  { code:'CH', name:'Switzerland', flag:'🇨🇭', cities:['Zurich'], load:22 },
-  { code:'DE', name:'Germany', flag:'🇩🇪', cities:['Frankfurt','Berlin'], load:35 },
-  { code:'NL', name:'Netherlands', flag:'🇳🇱', cities:['Amsterdam'], load:30 },
-  { code:'JP', name:'Japan', flag:'🇯🇵', cities:['Tokyo'], load:44 },
-  { code:'IS', name:'Iceland', flag:'🇮🇸', cities:['Reykjavik'], load:18 },
-  { code:'AU', name:'Australia', flag:'🇦🇺', cities:['Sydney'], load:38 },
-  { code:'FR', name:'France', flag:'🇫🇷', cities:['Paris'], load:29 },
+  { code:'CA', name:'Canada', flag:'🇨🇦', cities:['Toronto','Montreal','Vancouver'], load:32, p2p:true, tor:true, lat:45.4215, lon:-75.6972 },
+  { code:'US', name:'United States', flag:'🇺🇸', cities:['New York','Los Angeles','Chicago'], load:41, lat:39.8283, lon:-98.5795 },
+  { code:'GB', name:'United Kingdom', flag:'🇬🇧', cities:['London'], load:28, lat:51.5074, lon:-0.1278 },
+  { code:'CH', name:'Switzerland', flag:'🇨🇭', cities:['Zurich'], load:22, lat:47.3769, lon:8.5417 },
+  { code:'DE', name:'Germany', flag:'🇩🇪', cities:['Frankfurt','Berlin'], load:35, lat:50.1109, lon:8.6821 },
+  { code:'NL', name:'Netherlands', flag:'🇳🇱', cities:['Amsterdam'], load:30, lat:52.3676, lon:4.9041 },
+  { code:'JP', name:'Japan', flag:'🇯🇵', cities:['Tokyo'], load:44, lat:35.6762, lon:139.6503 },
+  { code:'IS', name:'Iceland', flag:'🇮🇸', cities:['Reykjavik'], load:18, lat:64.1466, lon:-21.9426 },
+  { code:'AU', name:'Australia', flag:'🇦🇺', cities:['Sydney'], load:38, lat:-33.8688, lon:151.2093 },
+  { code:'FR', name:'France', flag:'🇫🇷', cities:['Paris'], load:29, lat:48.8566, lon:2.3522 },
 ]
+
+// Rough city coordinates used to place the exit marker on the map
+const CITY_COORDS: Record<string,{lat:number;lon:number}> = {
+  Fastest:{ lat:45.4215, lon:-75.6972 },
+  Toronto:{ lat:43.6532, lon:-79.3832 },
+  Montreal:{ lat:45.5019, lon:-73.5674 },
+  Vancouver:{ lat:49.2827, lon:-123.1207 },
+  'New York':{ lat:40.7128, lon:-74.006 },
+  'Los Angeles':{ lat:34.0522, lon:-118.2437 },
+  Chicago:{ lat:41.8781, lon:-87.6298 },
+  London:{ lat:51.5074, lon:-0.1278 },
+  Zurich:{ lat:47.3769, lon:8.5417 },
+  Frankfurt:{ lat:50.1109, lon:8.6821 },
+  Berlin:{ lat:52.52, lon:13.405 },
+  Amsterdam:{ lat:52.3676, lon:4.9041 },
+  Tokyo:{ lat:35.6762, lon:139.6503 },
+  Reykjavik:{ lat:64.1466, lon:-21.9426 },
+  Sydney:{ lat:-33.8688, lon:151.2093 },
+  Paris:{ lat:48.8566, lon:2.3522 },
+}
+
+type GeoPoint = { lat:number; lon:number; city:string; country:string; source:'ip'|'gps'|'default' }
+const FALLBACK_LOCATION: GeoPoint = { lat:45.5019, lon:-73.5674, city:'Montréal', country:'Canada', source:'default' }
+
+// Equirectangular projection onto the map viewBox (lon -180..180 → 0..100%, lat 90..-90 → 0..100%)
+function projectPoint(lat:number, lon:number){ return { x: ((lon+180)/360)*100, y: ((90-lat)/180)*100 } }
+
+function exitCoordsFor(p: { city?:string; countryCode?:string; countryName?:string; subtitle?:string }){
+  const byCity = p.city ? CITY_COORDS[p.city] : undefined;
+  if(byCity) return { ...byCity, label: p.city as string };
+  const byCountry = COUNTRIES.find(c=>c.code===p.countryCode) || COUNTRIES.find(c=>c.name===p.countryName);
+  if(byCountry) return { lat:byCountry.lat, lon:byCountry.lon, label:byCountry.name };
+  const bySubtitle = p.subtitle ? CITY_COORDS[p.subtitle] : undefined;
+  if(bySubtitle) return { ...bySubtitle, label: p.subtitle as string };
+  return { lat:CITY_COORDS.Toronto.lat, lon:CITY_COORDS.Toronto.lon, label:'Canada' };
+}
 
 export default function App(){
   const [serverUrl, setServerUrl] = useState(()=>{
@@ -118,6 +153,7 @@ export default function App(){
   const [hosts, setHosts] = useState<{main:any; hosts:HostEntry[]; online:number; total:number}|null>(null);
   const [clientIp, setClientIp] = useState<string>('');
   const [clientIpLoading, setClientIpLoading] = useState(true);
+  const [myLocation, setMyLocation] = useState<GeoPoint>(FALLBACK_LOCATION);
   const [logs, setLogs] = useState<string[]>(()=>[`[${new Date().toLocaleTimeString()}] OpenPath — GhostPath ready.`]);
   const [rtt, setRtt] = useState(0);
   const [rx, setRx] = useState(0);
@@ -165,6 +201,41 @@ export default function App(){
       } finally{ if(!cancelled) setClientIpLoading(false); }
     }
     fetchIp();
+    return ()=>{ cancelled=true }
+  }, []);
+
+  // Resolve where the user physically is, so the map can show "your location" while disconnected.
+  // IP lookup first (no prompt), then device GPS if it was already allowed, then a sensible fallback.
+  useEffect(()=>{
+    let cancelled=false;
+    (async()=>{
+      try{
+        const r = await fetch('https://ipapi.co/json/');
+        if(r.ok){
+          const d:any = await r.json();
+          if(!cancelled && typeof d.latitude==='number' && typeof d.longitude==='number'){
+            setMyLocation({ lat:d.latitude, lon:d.longitude, city:d.city||'Your city', country:d.country_name||'Your country', source:'ip' });
+            return;
+          }
+        }
+      }catch{}
+      try{
+        if(typeof navigator!=='undefined' && navigator.geolocation){
+          if(navigator.permissions){
+            const perm = await navigator.permissions.query({ name:'geolocation' as any });
+            if(perm.state==='granted'){
+              navigator.geolocation.getCurrentPosition(
+                pos=>{ if(!cancelled) setMyLocation({ lat:pos.coords.latitude, lon:pos.coords.longitude, city:'Your location', country:'Device GPS', source:'gps' }) },
+                ()=>{ if(!cancelled) setMyLocation(FALLBACK_LOCATION) },
+                { timeout:4000, maximumAge:600000 }
+              );
+              return;
+            }
+          }
+        }
+      }catch{}
+      if(!cancelled) setMyLocation(FALLBACK_LOCATION);
+    })();
     return ()=>{ cancelled=true }
   }, []);
 
@@ -220,9 +291,7 @@ export default function App(){
         setAds(a=>a+ Math.floor(Math.random()*3)); setTrackers(t=>t+ Math.floor(Math.random()*5)); setSaved(s=>s+ Math.floor(Math.random()*200));
         ws.send(JSON.stringify({op:'ping', t:Date.now()}));
         const payload={ status:"connected", profileName: prof.name, country:{code:"CA", name: prof.subtitle==="Canada"? "Canada": prof.name, flag: prof.flag||"🇨🇦", city: prof.subtitle==="Canada"?"Toronto":prof.subtitle}, stats:{rxBytes:100.94*1024*1024, txBytes:22.14*1024*1024, rxSpeedBps:2.16*1024, txSpeedBps:2.74*1024, durationSec:12, connectedSince:Date.now()}, ip: u.hostname, protocol: vpnMode==='fast'?'TurboDirect':'GhostPath', showSpeeds:true, showVolume:true };
-        // @ts-ignore
-        window.dispatchEvent(new CustomEvent("openpath:notification",{detail:payload}));
-        // REAL OS NOTIFICATION
+        // REAL OS NOTIFICATION (no in-app banner)
         fireSystemNotification(`${payload.country.flag} Connected to ${payload.country.name}`, `OpenPath • ${prof.name} • ${vpnMode==='fast'?'Turbo':'Stealth'} • ${u.host} • Encrypted`, '/favicon.png')
       };
       ws.onmessage=(ev)=>{
@@ -236,7 +305,7 @@ export default function App(){
         setRx(rxRef.current); setTx(txRef.current);
       };
       ws.onclose=(e)=>{ 
-        log(`Tunnel closed (${e.code})`); setConnected(false); wsRef.current=null; window.dispatchEvent(new CustomEvent("openpath:notification-hide")); 
+        log(`Tunnel closed (${e.code})`); setConnected(false); wsRef.current=null; 
         fireSystemNotification(`OpenPath • Disconnected`, `Tunnel closed (${e.code}) • IP ${clientIp||''} now visible`, '/favicon.png')
       };
       ws.onerror=()=>{ log(`Transport error — check PSK`); };
@@ -322,7 +391,12 @@ export default function App(){
     </div>
   );
 
-  const WorldMap = ({ highlighted }:{ highlighted?: boolean }) => (
+  const locationText = myLocation.source==='default' ? myLocation.country : `${myLocation.city}, ${myLocation.country}`;
+  const locationCity = myLocation.source==='default' ? '' : myLocation.city;
+  const WorldMap = ({ highlighted }:{ highlighted?: boolean }) => {
+    const you = projectPoint(myLocation.lat, myLocation.lon);
+    const exit = projectPoint(exitCoordsFor(selectedProfile).lat, exitCoordsFor(selectedProfile).lon);
+    return (
     <div style={{ position:'relative', height:220, overflow:'hidden', background:'#08080c' }}>
       <svg viewBox="0 0 1000 500" style={{ width:'100%', height:'100%', opacity: highlighted?1:0.55 }}>
         <path d="M 40 80 L 90 60 L 140 80 L 180 120 L 220 140 L 260 130 L 240 180 L 200 210 L 160 200 L 120 160 L 60 140 Z" fill="#3a3850" stroke="#4a4860" strokeWidth="1"/>
@@ -338,16 +412,31 @@ export default function App(){
           return <circle key={i} cx={x} cy={y} r="0.6" fill="#2a2a40" opacity="0.5"/>
         })}
       </svg>
+      {/* Exit server — only when connected */}
       {highlighted && (
-        <div style={{ position:'absolute', left:'29%', top:'34%', width:28, height:28, background:'rgba(16,196,126,0.25)', borderRadius:999, display:'grid', placeItems:'center', transform:'translate(-50%,-50%)' }}>
-          <div style={{ width:14, height:14, background:'#0ac47e', borderRadius:999, border:'3px solid #fff', boxShadow:'0 0 12px rgba(16,196,126,0.9)' }} />
-          <div style={{ position:'absolute', inset:0, borderRadius:999, border:'1px solid rgba(16,196,126,0.5)', animation:'pulse 2s infinite' } as any} />
-        </div>
+        <>
+          <div style={{ position:'absolute', left:`${exit.x}%`, top:`${exit.y}%`, width:28, height:28, background:'rgba(16,196,126,0.25)', borderRadius:999, display:'grid', placeItems:'center', transform:'translate(-50%,-50%)' }}>
+            <div style={{ width:14, height:14, background:'#0ac47e', borderRadius:999, border:'3px solid #fff', boxShadow:'0 0 12px rgba(16,196,126,0.9)' }} />
+            <div style={{ position:'absolute', inset:0, borderRadius:999, border:'1px solid rgba(16,196,126,0.5)', animation:'pulse 2s infinite' } as any} />
+          </div>
+          <div style={{ position:'absolute', left:`${exit.x}%`, top:`calc(${exit.y}% + 16px)`, transform:'translateX(-50%)', whiteSpace:'nowrap', fontSize:9, fontWeight:700, color:'#a7f3d0', background:'rgba(0,0,0,0.65)', border:'1px solid rgba(16,196,126,0.4)', borderRadius:999, padding:'1px 7px' }}>
+            {exitCoordsFor(selectedProfile).label}
+          </div>
+        </>
       )}
+      {/* Your location — always shown on the map */}
+      <div style={{ position:'absolute', left:`${you.x}%`, top:`${you.y}%`, width: highlighted?18:26, height: highlighted?18:26, background: highlighted?'rgba(148,163,184,0.25)':'rgba(59,130,246,0.28)', borderRadius:999, display:'grid', placeItems:'center', transform:'translate(-50%,-50%)', transition:'all 0.2s' }}>
+        <div style={{ width: highlighted?8:12, height: highlighted?8:12, background: highlighted?'#94a3b8':'#3b82f6', borderRadius:999, border:`${highlighted?2:3}px solid #fff`, boxShadow: highlighted?'0 0 8px rgba(148,163,184,0.8)':'0 0 14px rgba(59,130,246,1)' }} />
+        {!highlighted && <div style={{ position:'absolute', inset:0, borderRadius:999, border:'1px solid rgba(59,130,246,0.7)', animation:'pulse 2s infinite' } as any} />}
+      </div>
+      <div style={{ position:'absolute', left:`${you.x}%`, top:`calc(${you.y}% + ${highlighted?12:18}px)`, transform:'translateX(-50%)', whiteSpace:'nowrap', fontSize:9, fontWeight:700, color: highlighted?'#cbd5e1':'#bfdbfe', background:'rgba(0,0,0,0.65)', border:`1px solid ${highlighted?'#2a2a38':'rgba(59,130,246,0.5)'}`, borderRadius:999, padding:'1px 7px' }}>
+        {highlighted ? 'You' : `Your location${locationCity ? ` · ${locationCity}` : ''}`}
+      </div>
       <style>{`@keyframes pulse{0%{transform:scale(0.8);opacity:0.8}100%{transform:scale(1.6);opacity:0}}`}</style>
       <div style={{ position:'absolute', inset:0, background:'linear-gradient(to top, #0a0a0f 0%, transparent 40%, transparent 70%, rgba(10,106,90,0.25) 100%)', pointerEvents:'none' }} />
     </div>
-  );
+    );
+  };
 
   const HomeTab = () => (
     <div style={{ display:'grid', gap:0, background:'#000', minHeight:'100%' }}>
@@ -363,7 +452,8 @@ export default function App(){
           <div style={{ marginTop:8, color:'#e5e7eb', fontSize:12, lineHeight:1.6 }}>
             <div style={{ color:'#fbbf24', fontWeight:700 }}>⚠️ IP visible</div>
             <div style={{ color:'#9ca3af', fontSize:11 }}>Your IP is <span style={{ color:'#fff', fontFamily:'monospace', fontWeight:700 }}>{clientIpLoading ? '…' : clientIp || '—'}</span></div>
-            <div style={{ color:'#9ca3af', fontSize:11, marginTop:2 }}>Not connected • Your traffic is visible to FortiGate & ISP</div>
+            <div style={{ color:'#9ca3af', fontSize:11, marginTop:2 }}>Your location: <span style={{ color:'#bfdbfe', fontWeight:700 }}>{locationText}</span></div>
+            <div style={{ color:'#9ca3af', fontSize:11, marginTop:2 }}>Not connected • Traffic is visible to your network & ISP</div>
             <button onClick={()=>connect()} style={{ marginTop:10, background:'#6d4aff', color:'#fff', border:0, padding:'10px 28px', borderRadius:999, fontWeight:800, cursor:'pointer', fontSize:13 }}>Quick Connect</button>
           </div>
         ) : (
@@ -425,6 +515,7 @@ export default function App(){
             <div style={{ color:'#f87171', fontWeight:700, fontSize:13, display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>🔓 Not protected</div>
             <div style={{ color:'#9ca3af', fontSize:12, marginTop:6, lineHeight:1.5 }}>
               Your IP <span style={{ color:'#fff', fontFamily:'monospace' }}>{clientIpLoading?'…':clientIp}</span> is visible.<br/>
+              Your location <span style={{ color:'#bfdbfe', fontWeight:700 }}>{locationText}</span><br/>
               Connect to hide your location and encrypt traffic.
             </div>
             <div style={{ marginTop:10, display:'flex', gap:8 }}>
@@ -454,7 +545,7 @@ export default function App(){
             <button onClick={()=>{ setTab('releases'); fetchReleases() }} style={{ background:'#1a1a24', border:'1px solid #2a2a38', color:'#a78bfa', padding:'4px 8px', borderRadius:999, fontSize:11, cursor:'pointer' }}>View all →</button>
           </div>
           <div style={{ color:'#9ca3af', fontSize:11, marginTop:6 }}>
-            {releases ? `${releases.length} releases • latest ${releases[0]?.tag_name||releases[0]?.name||'v1.1'}` : 'Native apps: Windows NSIS, macOS DMG, Linux deb/rpm/AppImage, Android APK/IPA • Proton-parity features'}
+            {releases ? `${releases.length} releases • latest ${releases[0]?.tag_name||releases[0]?.name||'v1.1'}` : 'Native installers for Windows, macOS, Linux, Android & iOS'}
           </div>
           <div style={{ marginTop:8, display:'flex', gap:6, flexWrap:'wrap' }}>
             <span style={{ background:'#1a1a24', border:'1px solid #2a2a38', color:'#e5e7eb', padding:'3px 8px', borderRadius:999, fontSize:10 }}>Windows</span>
@@ -474,7 +565,7 @@ export default function App(){
     <div style={{ background:'#000', minHeight:'100%', paddingBottom:80 }}>
       <div style={{ padding:'16px 16px 10px', position:'sticky', top:0, background:'#000', zIndex:2 }}>
         <div style={{ color:'#fff', fontWeight:800, fontSize:18 }}>Countries</div>
-        <div style={{ color:'#9ca3af', fontSize:11, marginTop:4 }}>Pick fastest exit — like Proton. App fetches <code style={{ background:'#1a1a24', padding:'2px 6px', borderRadius:6 }}>GET /api/hosts</code> once, not constantly.</div>
+        <div style={{ color:'#9ca3af', fontSize:11, marginTop:4 }}>Pick the fastest exit. Servers load once from <code style={{ background:'#1a1a24', padding:'2px 6px', borderRadius:6 }}>GET /api/hosts</code>.</div>
         <div style={{ marginTop:10, display:'flex', gap:6 }}>
           <input value={serverUrl} onChange={e=>setServerUrl(e.target.value)} style={{ flex:1, background:'#1a1a24', border:'1px solid #2a2a38', color:'#e5e7eb', padding:'8px 10px', borderRadius:8, fontSize:11, fontFamily:'monospace' }} />
           <button onClick={async()=>{
@@ -738,120 +829,142 @@ export default function App(){
   );
 
   const SettingsTab = () => {
-    const isProfileLocked = connected && selectedProfile.id==='school';
-    const [notifPerm, setNotifPerm] = useState(()=> typeof Notification !== 'undefined' ? Notification.permission : 'unsupported')
+    const [notifPerm, setNotifPerm] = useState<string>(()=> typeof Notification !== 'undefined' ? Notification.permission : 'unsupported')
+    const [showLogs, setShowLogs] = useState(false)
+    const [copied, setCopied] = useState(false)
+    const [confirmReset, setConfirmReset] = useState(false)
+
     const requestNotif = async()=>{
       if(typeof Notification === 'undefined') return
       const p = await Notification.requestPermission()
       setNotifPerm(p)
-      if(p==='granted') fireSystemNotification('OpenPath • Notifications enabled', 'You will get real OS notifications when VPN connects/disconnects. Persistent notification is always on.', '/favicon.png')
+      log(`Notification permission: ${p}`)
+      if(p==='granted') fireSystemNotification('OpenPath VPN', 'Notifications enabled. Alerts appear in your system notification center.', '/favicon.png')
     }
-    if(isProfileLocked){
-      return (
-        <div style={{ background:'#000', minHeight:'100%', paddingBottom:80 }}>
-          <div style={{ padding:'12px 16px 0' }}>
-            <div style={{ background:'#1e1b2e', border:'1px solid #2a2a38', borderRadius:10, padding:'10px 12px', display:'flex', gap:10, alignItems:'center' }}>
-              <span style={{ background:'#6d4aff', width:24, height:24, borderRadius:6, display:'grid', placeItems:'center', fontSize:12 }}>💼</span>
-              <span style={{ color:'#e5e7eb', fontSize:11, lineHeight:1.4 }}>These settings are connected to <b style={{ color:'#fff' }}>School</b> and can only be managed in Profiles.</span>
-            </div>
-          </div>
-          <div style={{ padding:16 }}>
-            <div style={{ color:'#a78bfa', fontSize:11, fontWeight:700, letterSpacing:0.5, textTransform:'uppercase' }}>Account</div>
-            <div style={{ marginTop:10, display:'flex', gap:10, alignItems:'center' }}>
-              <div style={{ width:28, height:28, borderRadius:999, background:'#6d4aff', display:'grid', placeItems:'center', color:'#fff', fontWeight:800, fontSize:12 }}>M</div>
-              <div>
-                <div style={{ color:'#fff', fontWeight:700, fontSize:12 }}>mob5824</div>
-                <div style={{ color:'#9ca3af', fontSize:11 }}>mob5824@proton.me</div>
-              </div>
-            </div>
-            <div style={{ color:'#a78bfa', fontSize:11, fontWeight:700, marginTop:18 }}>Features</div>
-            <div style={{ marginTop:10, display:'grid', gap:10 }}>
-              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                <span style={{ display:'flex', gap:10, alignItems:'center', color:'#e5e7eb', fontSize:13 }}><span style={{ width:24, height:24, borderRadius:6, background:'#0ac47e', display:'grid', placeItems:'center' }}>🛡️</span>NetShield</span>
-                <span style={{ background:'#1a1a24', border:'1px solid #2a2a38', padding:'4px 8px', borderRadius:6, color:'#e5e7eb', fontSize:11, display:'flex', gap:6, alignItems:'center' }}><span style={{ background:'#6d4aff', color:'#fff', padding:'1px 6px', borderRadius:999, fontSize:9 }}>🇨🇦</span>On</span>
-              </div>
-              <div style={{ background:'#12121a', borderRadius:10, padding:'12px 14px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                <span style={{ display:'flex', gap:10, color:'#e5e7eb', fontSize:13 }}><span>↗️</span>Split tunneling</span>
-                <span style={{ color:'#9ca3af', fontSize:11 }}>Off</span>
-              </div>
-              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                <span style={{ display:'flex', gap:10, color:'#e5e7eb', fontSize:13 }}><span>⛔</span>Kill switch</span>
-                <span style={{ color:'#6b7280' }}>›</span>
-              </div>
-            </div>
-            <div style={{ color:'#a78bfa', fontSize:11, fontWeight:700, marginTop:18 }}>Connection</div>
-            <div style={{ marginTop:10, display:'grid', gap:12 }}>
-              <div style={{ display:'flex', gap:10, color:'#e5e7eb', fontSize:13 }}><span>🔖</span>Connection preferences <span style={{ marginLeft:'auto', color:'#6b7280' }}>›</span></div>
-              <div style={{ display:'flex', gap:10, color:'#e5e7eb', fontSize:13 }}><span>🧩</span>Protocol <span style={{ marginLeft:'auto', background:'#1a1a24', border:'1px solid #2a2a38', padding:'2px 8px', borderRadius:6, fontSize:11, display:'flex', gap:6 }}><span style={{ background:'#6d4aff', color:'#fff', padding:'1px 4px', borderRadius:4, fontSize:9 }}>🇨🇦</span>Stealth</span></div>
-              <div style={{ display:'flex', gap:10, color:'#e5e7eb', fontSize:13 }}><span>🎛️</span>Advanced settings <span style={{ marginLeft:'auto', color:'#6b7280' }}>›</span></div>
-            </div>
-          </div>
+    const testNotif = ()=> fireSystemNotification('OpenPath VPN', 'Test notification — this is how connect and disconnect alerts look.', '/favicon.png')
+    const copyLogs = async()=>{
+      try{ await navigator.clipboard.writeText(logs.join('\n')); setCopied(true); setTimeout(()=>setCopied(false), 1500) }catch{}
+    }
+    const resetLocal = ()=>{
+      if(!confirmReset){ setConfirmReset(true); setTimeout(()=>setConfirmReset(false), 4000); return }
+      try{
+        localStorage.removeItem('openpath:editable-profiles')
+        localStorage.removeItem('openpath:mode')
+      }catch{}
+      setEditableProfiles(DEFAULT_EDITABLE.map(p=>({ ...p })))
+      setVpnMode('stealth')
+      setConfirmReset(false)
+      log('Local profiles and settings reset')
+    }
+
+    const notifText = notifPerm==='granted' ? 'Enabled' : notifPerm==='denied' ? 'Blocked in system settings' : notifPerm==='unsupported' ? 'Not supported here' : 'Off — tap to enable'
+    const serverHost = serverUrl.replace('wss://','').replace('ws://','').split('/')[0]
+
+    const Section = ({ title, children }:{ title:string; children:React.ReactNode }) => (
+      <div style={{ marginTop:18 }}>
+        <div style={{ color:'#a78bfa', fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:0.5, marginBottom:8 }}>{title}</div>
+        <div style={{ background:'#12121a', border:'1px solid #1f1f2a', borderRadius:12, overflow:'hidden' }}>{children}</div>
+      </div>
+    )
+    const Row = ({ icon, title, sub, right, onClick, last }:{ icon:string; title:string; sub?:string; right?:React.ReactNode; onClick?:()=>void; last?:boolean }) => (
+      <div onClick={onClick} style={{ display:'flex', alignItems:'center', gap:12, padding:'13px 14px', borderBottom: last ? 'none' : '1px solid #1f1f2a', cursor: onClick ? 'pointer' : 'default' }}>
+        <span style={{ width:22, textAlign:'center', fontSize:13 }}>{icon}</span>
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ color:'#e5e7eb', fontSize:13, fontWeight:600 }}>{title}</div>
+          {sub && <div style={{ color:'#8b8da3', fontSize:11, marginTop:2, lineHeight:1.45 }}>{sub}</div>}
         </div>
-      )
-    }
+        <div style={{ color:'#9ca3af', fontSize:11, display:'flex', alignItems:'center', gap:6, flexShrink:0 }}>{right ?? '›'}</div>
+      </div>
+    )
+
     return (
       <div style={{ background:'#000', minHeight:'100%', paddingBottom:80 }}>
-        <div style={{ padding:'12px 16px' }}>
+        <div style={{ padding:'16px 16px 0' }}>
           <div style={{ color:'#fff', fontWeight:800, fontSize:18 }}>Settings</div>
-          <div style={{ marginTop:14, color:'#a78bfa', fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:0.5 }}>General</div>
-          <div style={{ marginTop:8, display:'grid', gap:1 }}>
-            <div onClick={requestNotif} style={{ display:'flex', alignItems:'center', gap:12, padding:'12px 0', borderBottom:'1px solid #12121a', cursor:'pointer' }}>
-              <span style={{ fontSize:14, width:20, textAlign:'center', color:'#e5e7eb' }}>🔔</span>
-              <div style={{ flex:1 }}>
-                <div style={{ color:'#e5e7eb', fontSize:13, fontWeight:600 }}>Notifications {notifPerm==='granted' ? '• Enabled' : notifPerm==='denied' ? '• Blocked' : '• Tap to enable'}</div>
-                <div style={{ color:'#9ca3af', fontSize:11 }}>{notifPerm==='granted' ? 'Real OS notifications active (always-present style)' : 'Enable for persistent system notification like Proton'}</div>
+          <div style={{ color:'#8b8da3', fontSize:11, marginTop:4 }}>Everything on this page changes how OpenPath behaves on this device.</div>
+        </div>
+        <div style={{ padding:'0 16px 16px' }}>
+
+          <Section title="Connection">
+            <div style={{ padding:'13px 14px' }}>
+              <div style={{ color:'#e5e7eb', fontSize:13, fontWeight:600 }}>Protocol</div>
+              <div style={{ color:'#8b8da3', fontSize:11, marginTop:2 }}>
+                {vpnMode==='stealth' ? 'Stealth — TLS inside TLS over TCP 443, survives FortiGate' : 'Turbo — plain WebSocket, lowest overhead, trusted networks only'}
               </div>
-              <span style={{ color: notifPerm==='granted' ? '#0ac47e':'#6b7280', fontSize:12 }}>{notifPerm==='granted'?'✓':'›'}</span>
+              <div style={{ marginTop:10, display:'flex', gap:6, background:'#0a0a0f', border:'1px solid #2a2a38', borderRadius:999, padding:3 }}>
+                <button onClick={()=>{ setVpnMode('stealth'); log('Protocol set to Stealth') }} style={{ flex:1, padding:'8px 10px', borderRadius:999, border:0, fontSize:12, fontWeight:700, cursor:'pointer', background: vpnMode==='stealth'?'#6d4aff':'transparent', color: vpnMode==='stealth'?'#fff':'#9ca3af' }}>Stealth</button>
+                <button onClick={()=>{ setVpnMode('fast'); log('Protocol set to Turbo') }} style={{ flex:1, padding:'8px 10px', borderRadius:999, border:0, fontSize:12, fontWeight:700, cursor:'pointer', background: vpnMode==='fast'?'#6d4aff':'transparent', color: vpnMode==='fast'?'#fff':'#9ca3af' }}>Turbo</button>
+              </div>
             </div>
-            {[
-              { icon:'◐', name:'Theme', sub:'Dark' },
-              { icon:'⊞', name:'App icon', sub:'' },
-              { icon:'📱', name:'Widget', sub:'' },
-              { icon:'🔧', name:'hxreborn patches', sub:'' },
-            ].map(it=>(
-              <div key={it.name} style={{ display:'flex', alignItems:'center', gap:12, padding:'12px 0', borderBottom:'1px solid #12121a' }}>
-                <span style={{ fontSize:14, width:20, textAlign:'center', color:'#e5e7eb' }}>{it.icon}</span>
-                <div style={{ flex:1 }}>
-                  <div style={{ color:'#e5e7eb', fontSize:13, fontWeight:600 }}>{it.name}</div>
-                  {it.sub && <div style={{ color:'#9ca3af', fontSize:11 }}>{it.sub}</div>}
+            <div style={{ padding:'0 14px 13px' }}>
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8 }}>
+                <div style={{ minWidth:0 }}>
+                  <div style={{ color:'#e5e7eb', fontSize:12, fontWeight:600 }}>Server</div>
+                  <div style={{ color:'#8b8da3', fontSize:11, fontFamily:'monospace', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{serverHost}</div>
                 </div>
-                <span style={{ color:'#6b7280' }}>›</span>
+                <button onClick={async()=>{
+                  try{
+                    const r=await fetch('/api/hosts');
+                    if(r.ok){ const d=await r.json(); setHosts(d); log('Refreshed hosts: '+d.online+' online') }
+                  }catch(e:any){ log('Refresh failed: '+e.message) }
+                }} style={{ background:'#1a1a24', border:'1px solid #2a2a38', color:'#e5e7eb', padding:'6px 12px', borderRadius:8, cursor:'pointer', fontSize:11, flexShrink:0 }}>↻ Refresh</button>
               </div>
-            ))}
-          </div>
-          <div style={{ color:'#a78bfa', fontSize:11, fontWeight:700, marginTop:14, textTransform:'uppercase' }}>Support</div>
-          <div style={{ marginTop:8 }}>
-            {[
-              { icon:'🛟', name:'Support center', ext:true },
-              { icon:'🐞', name:'Report an issue', active:true },
-              { icon:'</>', name:'Debug logs', ext:false },
-            ].map(it=>(
-              <div key={it.name} style={{ display:'flex', alignItems:'center', gap:12, padding:'12px 8px', background: it.active?'#1a1a24':'transparent', borderRadius:8 }}>
-                <span style={{ fontSize:14 }}>{it.icon}</span>
-                <span style={{ flex:1, color:'#e5e7eb', fontSize:13 }}>{it.name}</span>
-                {it.ext && <span style={{ border:'1px solid #2a2a38', padding:'2px 6px', borderRadius:4, fontSize:10, color:'#9ca3af' }}>↗</span>}
+              <div style={{ color:'#8b8da3', fontSize:11, marginTop:6 }}>{hosts ? `${hosts.online} of ${hosts.total} servers online` : 'Server list not loaded yet'}</div>
+            </div>
+          </Section>
+
+          <Section title="Notifications">
+            <Row
+              icon="🔔"
+              title="System notifications"
+              sub="Connect and disconnect alerts use your operating system notification center. OpenPath does not show an in-app banner."
+              right={<span style={{ color: notifPerm==='granted' ? '#0ac47e' : notifPerm==='denied' ? '#f87171' : '#e5e7eb', fontWeight:700 }}>{notifText}</span>}
+              onClick={notifPerm==='granted' ? undefined : requestNotif}
+              last={notifPerm!=='granted'}
+            />
+            {notifPerm==='granted' && (
+              <>
+                <Row icon="🧪" title="Send a test notification" sub="Fires one real system notification" onClick={testNotif} last />
+              </>
+            )}
+          </Section>
+
+          <Section title="Profiles">
+            <Row icon="▭" title={`${editableProfiles.length} saved profiles`} sub="Edit, duplicate or delete them in Profiles" onClick={()=>setTab('profiles')} />
+            <Row icon="＋" title="Create profile" sub="Name, colour, icon, location and profile settings" onClick={startCreate} last />
+          </Section>
+
+          <Section title="App">
+            <Row
+              icon="⬆"
+              title="Releases"
+              sub={releases?.length ? `Latest ${releases[0]?.tag_name || releases[0]?.name}` : 'Builds for Windows, macOS, Linux, Android, iOS'}
+              onClick={()=>{ setTab('releases'); fetchReleases() }}
+            />
+            <Row icon="⌥" title="Source code" sub="GitHub repository" onClick={()=>window.open('https://github.com/mob5824m-wq/OpenPath-VPN','_blank')} />
+            <Row icon="🐞" title="Report an issue" sub="Opens a GitHub issue" onClick={()=>window.open('https://github.com/mob5824m-wq/OpenPath-VPN/issues','_blank')} last />
+          </Section>
+
+          <Section title="Diagnostics">
+            <Row icon="</>" title="Connection log" sub={`${logs.length} events on this device`} right={<span>{showLogs ? 'Hide' : 'Show'}</span>} onClick={()=>setShowLogs(v=>!v)} last={!showLogs} />
+            {showLogs && (
+              <div style={{ padding:'0 14px 12px' }}>
+                <div style={{ background:'#0a0a0f', border:'1px solid #2a2a38', borderRadius:8, padding:10, maxHeight:160, overflow:'auto', fontFamily:'JetBrains Mono, monospace', fontSize:10, color:'#9ca3af', whiteSpace:'pre-wrap', lineHeight:1.6 }}>
+                  {logs.slice(-12).join('\n') || 'No events yet'}
+                </div>
+                <button onClick={copyLogs} style={{ marginTop:8, background:'#1a1a24', border:'1px solid #2a2a38', color:'#e5e7eb', padding:'6px 12px', borderRadius:8, cursor:'pointer', fontSize:11 }}>{copied ? 'Copied' : 'Copy log'}</button>
               </div>
-            ))}
+            )}
+          </Section>
+
+          <Section title="About">
+            <Row icon="🛡️" title="OpenPath VPN" sub="Web app 1.0.0 • GhostPath stealth transport" right="" />
+            <Row icon="↺" title={confirmReset ? 'Tap again to confirm reset' : 'Reset local data'} sub="Deletes saved profiles and protocol choice on this device" right="" onClick={resetLocal} last />
+          </Section>
+
+          <div style={{ marginTop:16, textAlign:'center', color:'#4b5563', fontSize:10 }}>
+            {serverHost} • {hosts?.online ?? 0}/{hosts?.total ?? 0} servers • PSK hidden
           </div>
-          <div style={{ color:'#a78bfa', fontSize:11, fontWeight:700, marginTop:14, textTransform:'uppercase' }}>Releases</div>
-          <div style={{ marginTop:8, background:'#12121a', border:'1px solid #1f1f2a', borderRadius:12, padding:12 }}>
-            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-              <div style={{ color:'#e5e7eb', fontWeight:700, fontSize:12 }}>App Releases</div>
-              <button onClick={()=>{ setTab('releases'); fetchReleases() }} style={{ background:'#6d4aff', border:0, color:'#fff', padding:'6px 10px', borderRadius:999, fontSize:10, cursor:'pointer', fontWeight:700 }}>Open →</button>
-            </div>
-            <div style={{ color:'#9ca3af', fontSize:11, marginTop:6 }}>{releasesLoading ? 'Loading…' : releases ? `${releases.length} releases • ${releases[0]?.tag_name||'no tags yet'}` : 'Tap to load GitHub releases (auto-tag +0.1 on main merge)'}</div>
-            <div style={{ marginTop:8, display:'flex', gap:6, flexWrap:'wrap' }}>
-              {['Windows','macOS','Linux','Android','iOS'].map(pl=> (
-                <span key={pl} style={{ background:'#1a1a24', border:'1px solid #2a2a38', color:'#e5e7eb', padding:'3px 8px', borderRadius:999, fontSize:10 }}>{pl}</span>
-              ))}
-            </div>
-          </div>
-          <div style={{ color:'#a78bfa', fontSize:11, fontWeight:700, marginTop:14, textTransform:'uppercase' }}>Improve Proton</div>
-          <div style={{ marginTop:8 }}>
-            <div style={{ display:'flex', alignItems:'center', gap:12, padding:'12px 0' }}><span>👥</span><span style={{ flex:1, color:'#e5e7eb', fontSize:13 }}>Help us fight censorship</span></div>
-            <div style={{ display:'flex', alignItems:'center', gap:12, padding:'12px 0' }}><span>⭐</span><span style={{ flex:1, color:'#e5e7eb', fontSize:13 }}>Rate Proton VPN</span><span style={{ border:'1px solid #2a2a38', padding:'2px 6px', borderRadius:4, fontSize:10 }}>↗</span></div>
-          </div>
-          <div style={{ marginTop:16, display:'flex', gap:12, color:'#e5e7eb', fontSize:13, padding:'12px 0', borderTop:'1px solid #12121a' }}><span>↪️</span>Sign out</div>
         </div>
       </div>
     );
@@ -934,7 +1047,6 @@ export default function App(){
   return (
     <div style={{ fontFamily:'Inter, system-ui, sans-serif', background:'#000', minHeight:'100vh', color:'#e5e7eb', display:'flex', flexDirection:'column', maxWidth:440, margin:'0 auto', borderLeft:'1px solid #1a1a24', borderRight:'1px solid #1a1a24', position:'relative' }}>
       <TopChrome />
-      <PersistentNotification onDisconnect={disconnect} />
       <div style={{ flex:1, overflow:'auto', WebkitOverflowScrolling:'touch' as any }}>
         {tab==='home' && <HomeTab />}
         {tab==='countries' && <CountriesTab />}
