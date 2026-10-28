@@ -1,21 +1,55 @@
-name: build
-on: [push, workflow_dispatch]
+name: Build and test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 20 }
-      - run: ./scripts/build-all.sh
-      - run: |
-          cd client/linux && npx electron-builder --linux AppImage --publish never || true
-          cd ../.. && ls -R client/linux/dist-installer || true
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            server/package-lock.json
+            client/web/package-lock.json
+            client/linux/package-lock.json
+            client/desktop/package-lock.json
+      - name: Test and build server
+        run: |
+          set -euo pipefail
+          npm ci --prefix server --no-audit --no-fund
+          npm test --prefix server
+          npm run build --prefix server
+      - name: Test and build dashboard
+        run: |
+          set -euo pipefail
+          npm ci --prefix client/web --no-audit --no-fund
+          npm test --prefix client/web
+          npm run typecheck --prefix client/web
+          npm run build --prefix client/web
+      - name: Test legacy Linux renderer (not a release artifact)
+        run: |
+          set -euo pipefail
+          npm ci --prefix client/linux --ignore-scripts --no-audit --no-fund
+          npm test --prefix client/linux
+          npm run build --prefix client/linux
+      - name: Test legacy Electron shell (not a release artifact)
+        run: |
+          set -euo pipefail
+          npm ci --prefix client/desktop --ignore-scripts --no-audit --no-fund
+          npm test --prefix client/desktop
       - uses: actions/upload-artifact@v4
         with:
-          name: openpath-linux
+          name: openpath-compiled-builds
+          if-no-files-found: error
           path: |
-            client/linux/dist-installer/*
-            client/linux/cli/dist/*
-            client/web/dist/*
-            server/dist/*
+            server/dist/**
+            client/web/dist/**

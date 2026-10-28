@@ -1,11 +1,14 @@
 appId: com.openpath.vpn
 productName: OpenPath VPN
 artifactName: "${productName}-${version}-${os}-${arch}.${ext}"
-directories: { output: dist-installer, buildResources: ../linux/installers }
-files: [electron/**, ../web/dist/**, ../core/dist/**, package.json]
+directories: { output: dist-installer, buildResources: ../../assets }
+files: [electron/**, package.json]
+extraResources:
+  - from: ../web/dist
+    to: web
 win:
   target: [nsis, zip]
-  icon: ../linux/installers/icon.png
+  icon: ../../assets/icon-512.png
   publisherName: OpenPath
 nsis:
   oneClick: false
@@ -14,10 +17,11 @@ nsis:
 mac:
   target: [dmg, zip]
   category: public.app-category.networking
-  icon: ../linux/installers/icon.png
+  icon: ../../assets/icon-512.png
 linux:
   target: [deb, rpm, AppImage]
   category: Network
-  icon: ../linux/installers/icon.png
+  icon: ../../assets/icon-512.png
 dmg: { sign: false }
-deb: { depends: [libnss3, libxss1, libasound2] }
+deb:
+  depends: [libgtk-3-0, libnss3, libnspr4, libxss1, libasound2, libgbm1, libatk-bridge2.0-0, libx11-xcb1, libxcomposite1, libxdamage1, libxfixes3, libxrandr2, libxcb1, libcups2, libdbus-1-3]

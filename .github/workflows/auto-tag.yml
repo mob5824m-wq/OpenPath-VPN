@@ -8,113 +8,46 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: auto-tag-main
+  cancel-in-progress: false
+
 jobs:
   bump-tag:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Configure git
+      - name: Create the next version tag for this exact commit
+        shell: bash
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-      - name: Get latest tag and bump by .1
-        id: bump
-        run: |
-          # Fetch tags
-          git fetch --tags 2>&1 | head
-          
-          # Get latest tag matching v*.* or v*.*.*
-          LATEST=$(git tag -l "v*" --sort=-v:refname | head -n1)
-          echo "Latest tag: ${LATEST:-none}"
-
-          if [ -z "$LATEST" ]; then
-            # No tags yet, start at v1.0
-            NEW_TAG="v1.0"
-            echo "No tags found, starting at v1.0"
-          else
-            # Remove v prefix
-            VER=${LATEST#v}
-            echo "Current version: $VER"
-            
-            # Handle both v1.0 and v1.0.0 formats
-            # For v1.0 -> split on ., bump minor by 1
-            # For v1.0.0 -> bump minor (second part)
-            IFS='.' read -r MAJOR MINOR PATCH <<< "$VER"
-            MAJOR=${MAJOR:-1}
-            MINOR=${MINOR:-0}
-            PATCH=${PATCH:-}
-            
-            # Bump minor by 1 (0.1 increment)
-            NEW_MINOR=$((MINOR + 1))
-            
-            if [ -n "$PATCH" ]; then
-              # Has patch version, keep format vX.Y.Z -> bump Y
-              NEW_TAG="v${MAJOR}.${NEW_MINOR}.0"
-            else
-              # Simple vX.Y format
-              NEW_TAG="v${MAJOR}.${NEW_MINOR}"
+          set -euo pipefail
+          git fetch --force --tags
+          while IFS= read -r existing; do
+            if [[ "$existing" =~ ^v[0-9]+\.[0-9]+(\.[0-9]+)?(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
+              echo "This commit already has tag $existing"
+              exit 0
             fi
-            echo "Bumping $LATEST -> $NEW_TAG"
-          fi
-
-          # Check if tag already exists (avoid duplicate on manual re-run)
-          if git rev-parse "$NEW_TAG" >/dev/null 2>&1; then
-            echo "Tag $NEW_TAG already exists, incrementing again"
-            # Try to find next available tag
-            for i in 1 2 3 4 5; do
-              VER2=${NEW_TAG#v}
-              IFS='.' read -r MAJ2 MIN2 PAT2 <<< "$VER2"
-              NEW_TAG="v${MAJ2}.$((MIN2 + 1))"
-              if ! git rev-parse "$NEW_TAG" >/dev/null 2>&1; then
-                break
-              fi
-            done
-          fi
-
-          echo "NEW_TAG=$NEW_TAG" >> $GITHUB_ENV
-          echo "new_tag=$NEW_TAG" >> $GITHUB_OUTPUT
-          echo "✅ New tag will be: $NEW_TAG"
-
-      - name: Create and push tag
-        run: |
-          NEW_TAG="${{ steps.bump.outputs.new_tag }}"
-          echo "Creating tag $NEW_TAG"
-          
-          # Check if commit already has a tag pointing to it
-          EXISTING_TAG_ON_HEAD=$(git tag --points-at HEAD | head -n1)
-          if [ -n "$EXISTING_TAG_ON_HEAD" ]; then
-            echo "⚠️ HEAD already has tag $EXISTING_TAG_ON_HEAD, skipping tag creation to avoid duplicate"
-            exit 0
-          fi
-          
-          git tag -a "$NEW_TAG" -m "Auto-bump to $NEW_TAG on merge to main"
-          git push origin "$NEW_TAG"
-          echo "✅ Pushed tag $NEW_TAG — release workflow will now trigger"
-
-      - name: Update package.json versions (optional, commit to main)
-        run: |
-          NEW_TAG="${{ steps.bump.outputs.new_tag }}"
-          VER=${NEW_TAG#v}
-          echo "Updating package versions to $VER"
-          
-          # Update server/package.json if exists
-          if [ -f server/package.json ]; then
-            jq --arg ver "$VER" '.version = $ver' server/package.json > /tmp/pkg.json && mv /tmp/pkg.json server/package.json
-            echo "Updated server/package.json to $VER"
-          fi
-          
-          # Only commit if there are changes and we're not in detached state
-          if ! git diff --quiet; then
-            git add server/package.json 2>&1 || true
-            git commit -m "chore: bump version to $VER [skip ci]" 2>&1 || true
-            git push origin main 2>&1 || echo "Push version bump failed (may need pull first)"
+          done < <(git tag --points-at HEAD -l 'v*' --sort=-v:refname)
+          LATEST=''
+          while IFS= read -r candidate; do
+            if [[ "$candidate" =~ ^v[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then LATEST="$candidate"; break; fi
+          done < <(git tag -l 'v*' --sort=-v:refname)
+          if [ -z "$LATEST" ]; then
+            TAG=v1.0
           else
-            echo "No version file changes to commit"
+            VERSION=${LATEST#v}
+            IFS=. read -r MAJOR MINOR PATCH <<< "$VERSION"
+            NEXT=$((10#$MINOR + 1))
+            if [ -n "${PATCH:-}" ]; then TAG="v$MAJOR.$NEXT.0"; else TAG="v$MAJOR.$NEXT"; fi
           fi
-        continue-on-error: true
+          if git rev-parse --verify "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists; refusing to overwrite it" >&2; exit 1
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "refs/tags/$TAG"
+          echo "Created $TAG; the release workflow will build and publish it."

@@ -1,32 +1,63 @@
-// Electron main — platform TUN setup sketch
-import { app, BrowserWindow, ipcMain } from 'electron';
-import { spawn } from 'child_process';
-import path from 'path';
+// Electron shell for the dashboard and the optional native WireGuard VPN.
+const { app, BrowserWindow, ipcMain, shell, dialog, safeStorage } = require('electron');
+const path = require('path');
+const { startDashboardServer } = require('./dashboard-server');
+const { registerDeviceVpn } = require('./device-ipc');
 
 let win;
-function createWindow(){
+let dashboardServer;
+function createWindow(url){
   win = new BrowserWindow({
-    width: 1100, height: 740,
-    title: 'OpenPath VPN — GhostPath',
-    webPreferences: { preload: path.join(process.cwd(), 'electron/preload.js'), contextIsolation: true }
+    width:1100, height:740,
+    title:'OpenPath VPN — GhostPath',
+    webPreferences:{ preload:path.join(__dirname, 'preload.js'), contextIsolation:true, nodeIntegration:false },
   });
-  win.loadURL(process.env.VITE_URL || 'http://localhost:5173');
+  const openExternal = targetUrl=>{
+    try {
+      const target = new URL(targetUrl);
+      if(target.protocol === 'https:' || target.protocol === 'http:') void shell.openExternal(target.toString());
+    } catch {}
+  };
+  win.webContents.setWindowOpenHandler(({url:target})=>{ openExternal(target); return {action:'deny'}; });
+  win.webContents.on('will-navigate', (event, target)=>{
+    try { if(new URL(target).origin === new URL(url).origin) return; } catch {}
+    event.preventDefault();
+    openExternal(target);
+  });
+  void win.loadURL(url);
 }
 
-app.whenReady().then(createWindow);
-
-// TUN abstraction: on Windows uses wintun.dll, on macOS/linux uses /dev/net/tun + gVisor netstack
-// The real binary is `openpath-tun` (Go, compiled via `go build -o openpath-tun ./tun`)
-// Here we mock setup for demo packaging
-ipcMain.handle('tun:start', async (_e, cfg)=>{
-  console.log('[tun] start with', cfg);
-  // spawn openpath-tun --psk ... --server wss://...
-  return { ok:true, iface:'utun9', ip:'10.89.0.2' };
+let dashboardUrl = process.env.VITE_URL || 'http://localhost:5173';
+app.whenReady().then(async()=>{
+  if(app.isPackaged && !process.env.VITE_URL){
+    try {
+      const result = await startDashboardServer({
+        root:path.join(process.resourcesPath, 'web'),
+        backendUrl:process.env.OPENPATH_BACKEND_URL || 'http://127.0.0.1:4433',
+        port:Number(process.env.OPENPATH_DASHBOARD_PORT || '34567'),
+      });
+      dashboardServer = result.server;
+      dashboardUrl = result.url;
+    } catch(error) {
+      dialog.showErrorBox('Could not start OpenPath', error.message);
+      app.quit();
+      return;
+    }
+  }
+  createWindow(dashboardUrl);
 });
-ipcMain.handle('tun:stop', async ()=> ({ ok:true }));
+app.on('before-quit', ()=>dashboardServer?.close());
+app.on('window-all-closed', ()=>{ if(process.platform !== 'darwin') app.quit(); });
+app.on('activate', ()=>{ if(BrowserWindow.getAllWindows().length === 0) createWindow(dashboardUrl); else win?.show(); });
 
-// Window controls used by the in-app title bar
-ipcMain.on('window:minimize', () => win?.minimize());
-ipcMain.on('window:maximize', () => { if(!win) return; win.isMaximized() ? win.unmaximize() : win.maximize(); });
-ipcMain.on('window:close', () => win?.close());
-ipcMain.handle('tun:stats', async ()=> ({ rx: 0, tx: 0, rtt: 24 }));
+function isTrusted(event){
+  try {
+    return !!win && event.sender === win.webContents && event.senderFrame === win.webContents.mainFrame &&
+      new URL(event.senderFrame.url).origin === new URL(dashboardUrl).origin;
+  } catch { return false; }
+}
+registerDeviceVpn({ipcMain, app, dialog, safeStorage, getWindow:()=>win, isTrusted});
+
+ipcMain.on('window:minimize', event => { if(isTrusted(event)) win?.minimize(); });
+ipcMain.on('window:maximize', event => { if(isTrusted(event) && win) win.isMaximized() ? win.unmaximize() : win.maximize(); });
+ipcMain.on('window:close', event => { if(isTrusted(event)) win?.close(); });

@@ -11,3 +11,7 @@ certs
 .vscode
 .idea
 coverage
+dist-installer/
+__pycache__/
+*.py[cod]
+.venv/

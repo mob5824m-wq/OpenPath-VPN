@@ -1,40 +1,26 @@
 #!/usr/bin/env bash
-set -e
-echo "OpenPath — build all platforms (GUI + CLI + installers)"
-ROOT=$(cd "$(dirname $0)/.." && pwd)
-echo "Root: $ROOT"
+set -euo pipefail
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+PYTHON=${PYTHON:-python3}
 
-# Server
-echo "→ Server build..."
-(cd "$ROOT/server" && npm install && npx tsc --outDir dist && echo "  server ok")
+# The Electron directories are legacy and are not desktop release artifacts.
+for project in server client/web; do
+  echo "→ Installing and testing $project"
+  (cd "$ROOT/$project" && npm ci --no-audit --no-fund && npm test)
+done
+(cd "$ROOT/server" && npm run build)
+(cd "$ROOT/client/web" && npm run typecheck && npm run build)
 
-# Core
-echo "→ Core build..."
-(cd "$ROOT/client/core" && npm install && echo "  core ok")
-
-# Web (PWA)
-echo "→ Web build..."
-(cd "$ROOT/client/web" && npm install && npm run build && echo "  web ok")
-
-# Linux CLI + GUI
-echo "→ Linux CLI + GUI..."
-if [ -d "$ROOT/client/linux/cli" ]; then
-  (cd "$ROOT/client/linux/cli" && npm install && npx tsc -p tsconfig.json && chmod +x bin/openpath 2>/dev/null || true && echo "  linux cli ok" || echo "  linux cli skip (no npm)")
+if ! "$PYTHON" -c 'import PySide6.QtWidgets, keyring, websockets' >/dev/null 2>&1; then
+  echo 'Install native dependencies first: pip install -r client/native/requirements.txt' >&2
+  exit 1
 fi
-if [ -d "$ROOT/client/linux" ]; then
-  (cd "$ROOT/client/linux" && npm install 2>/dev/null && echo "  linux gui deps ok" || echo "  linux gui skip")
-fi
+QT_QPA_PLATFORM=${QT_QPA_PLATFORM:-offscreen} PYTHONPATH="$ROOT/client/native${PYTHONPATH:+:$PYTHONPATH}" \
+  "$PYTHON" -m unittest discover -s "$ROOT/client/native/tests" -v
 
-# CLI universal
-if [ -d "$ROOT/client/cli" ]; then
-  (cd "$ROOT/client/cli" && npm install 2>/dev/null && echo "  cli ok" || true)
+if [[ ${INCLUDE_LEGACY:-0} = 1 ]]; then
+  for project in client/linux client/desktop; do
+    (cd "$ROOT/$project" && npm ci --ignore-scripts --no-audit --no-fund && npm test)
+  done
 fi
-
-echo ""
-echo "✓ Done. Installers:"
-echo "  Linux deb/rpm/AppImage:  cd client/linux && npm run pack:all"
-echo "  Windows NSIS:            cd client/desktop && npx electron-builder --win nsis"
-echo "  macOS DMG:               cd client/desktop && npx electron-builder --mac dmg"
-echo "  Android APK:             cd client/android && ./gradlew assembleRelease"
-echo "  iOS IPA:                 Xcode archive (client/ios + client/macos)"
-echo "All binaries use TLS over TCP:443 + HTTPS mimicry — school sees standard web."
+echo 'Tests and server/preview builds complete. Native installers are built separately on each target platform.'
