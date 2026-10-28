@@ -1,318 +1,341 @@
-name: Native Installers (All OS)
+name: Native Installers
 
 on:
   push:
     branches: [main, "arena/**"]
-    tags: ["v*"]
   pull_request:
   workflow_dispatch:
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+    inputs:
+      tag:
+        description: "Optional release tag to build"
+        required: false
+        type: string
+  workflow_call:
+    inputs:
+      tag:
+        description: "Release tag to check out and build"
+        required: true
+        type: string
 
 permissions:
-  contents: write
-  packages: write
-  id-token: write
+  contents: read
+
+concurrency:
+  group: native-${{ github.workflow }}-${{ inputs.tag || github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  # ---------- Linux (CLI+GUI, deb/rpm/AppImage) ----------
-  linux:
-    runs-on: ubuntu-latest
+  stealth-linux:
+    name: Linux Stealth relay traffic
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-
-      # Use node with cache only if lockfile exists; fallback to no-cache variant
+        with:
+          ref: ${{ inputs.tag || github.sha }}
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: "**/package-lock.json"
-
-      - name: System deps
-        run: sudo apt-get update && sudo apt-get install -y libsecret-1-dev rpm fakeroot dpkg cpio squashfs-tools
-
-      - name: Build server + core
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install test dependencies
         run: |
-          npm install --prefix server || npm ci --prefix server || true
-          npm run build --prefix server || npx tsc --project server/tsconfig.json --outDir server/dist || true
-          npm install --prefix client/core 2>&1 | tail -5 || true
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends wireguard-tools iproute2 iputils-ping
+          npm ci --prefix server
+          python -m pip install websockets==15.0.1
+      - name: Verify actual WireGuard traffic through TLS and failure behavior
+        shell: bash
+        run: sudo env "PATH=$PATH" unshare -mn bash scripts/test-stealth-linux.sh
 
-      - name: Build Linux CLI
+  stealth-windows:
+    name: Windows Stealth relay handshake
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install WireGuard and relay test dependencies
+        shell: pwsh
         run: |
-          cd client/linux/cli
-          npm install || npm ci || true
-          npx tsc -p tsconfig.json --skipLibCheck || npx tsc -p tsconfig.json || true
-          chmod +x bin/openpath 2>/dev/null || true
+          choco install wireguard --version=1.1.1 -y --no-progress
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm ci --prefix server
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pip install websockets==15.0.1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify a real WireGuardNT handshake through TLS
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = "$pwd\client\native"
+          python scripts/test-stealth-windows.py 2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP\stealth-windows.log"
+          $code = $LASTEXITCODE
+          if ($code -ne 0) {
+            $tail = (Get-Content "$env:RUNNER_TEMP\stealth-windows.log" -Tail 25) -join ' '
+            Write-Output "::error::Windows Stealth handshake failed: $tail"
+            exit $code
+          }
 
-      - name: Build Linux GUI (AppImage + deb + rpm)
+  stealth-macos:
+    name: macOS Stealth relay handshake
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install WireGuard and relay test dependencies
+        run: |
+          brew list wireguard-tools >/dev/null 2>&1 || brew install wireguard-tools
+          npm ci --prefix server
+          python -m pip install websockets==15.0.1
+      - name: Verify a real wireguard-go handshake through TLS
+        shell: bash
+        run: |
+          set -uo pipefail
+          set +e
+          PYTHONPATH=client/native python scripts/test-stealth-macos.py 2>&1 | tee "$RUNNER_TEMP/stealth-macos.log"
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            echo "::error::macOS Stealth handshake failed: $(tail -n 25 "$RUNNER_TEMP/stealth-macos.log" | tr '\n\r' '  ')"
+            exit "$status"
+          fi
+
+  linux:
+    name: Linux x64 native app
+    timeout-minutes: 30
+    runs-on: ubuntu-24.04
+    # Build against glibc 2.35 for Ubuntu 22.04-compatible binaries.
+    container: ubuntu:22.04
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Install build and Qt dependencies
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            ca-certificates git python3 python3-pip python3-dev build-essential \
+            libglib2.0-0 libfontconfig1 libfreetype6 libgl1 libegl1 libdbus-1-3 \
+            libx11-6 libx11-xcb1 libxext6 libxrender1 libxkbcommon0 libxkbcommon-x11-0 \
+            libxcb1 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
+            libxcb-render0 libxcb-render-util0 libxcb-shape0 libxcb-shm0 libxcb-sync1 \
+            libxcb-xfixes0 libxcb-xinerama0 libxcb-xkb1
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.sha }}
+      - name: Install native build dependencies
+        run: python3 -m pip install -r client/native/requirements.txt
+      - name: Test native backend and Qt controls
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          QT_QPA_PLATFORM: offscreen
+          PYTHONPATH: client/native
+        run: python3 -m unittest discover -s client/native/tests -v
+      - id: version
+        env:
+          TAG: ${{ inputs.tag || 'v0.0.0-dev' }}
+        run: python3 client/native/version.py "$TAG" >> "$GITHUB_OUTPUT"
+      - name: Build and smoke-test native executable
+        env:
+          QT_QPA_PLATFORM: offscreen
         run: |
-          cd client/linux
-          npm install 2>&1 | tail -5 || true
-          npx vite build --config vite.config.ts 2>&1 | tail -20 || true
-          npx tsc -p tsconfig.json 2>&1 | tail -20 || true
-          # electron-builder — publish never on PR, always artifacts; don't fail job on pack error
-          npx electron-builder --linux AppImage deb rpm --publish never 2>&1 | tail -80 || npx electron-builder --linux deb --publish never 2>&1 | tail -40 || echo "electron-builder skipped (missing deps)"
-          ls -lh dist-installer 2>&1 | head -20 || true
-          ls -lh dist 2>&1 | head -20 || true
-
+          set -euo pipefail
+          run_checked() {
+            set +e
+            "$@" 2>&1 | tee /tmp/openpath-build.log
+            status=${PIPESTATUS[0]}
+            set -e
+            if [ "$status" -ne 0 ]; then
+              echo "::error::Native build command failed: $(tail -n 15 /tmp/openpath-build.log | tr '\n\r' '  ')"
+              exit "$status"
+            fi
+          }
+          run_checked python3 client/native/make_icons.py
+          run_checked python3 -m PyInstaller --noconfirm --clean --distpath client/native/dist --workpath client/native/build/pyinstaller client/native/OpenPath.spec
+          run_checked client/native/dist/OpenPath/OpenPath --smoke-test
+      - name: Package deb and portable archive
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.debian_version }}
+        run: bash client/native/package_linux.sh "$VERSION" "$TAG"
+      - name: Install and smoke-test the Debian package
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          set -euo pipefail
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends wireguard-tools iproute2 pkexec openresolv
+          dpkg -i "client/native/dist-installer/openpath-$TAG-linux-amd64.deb"
+          test -f /usr/share/applications/openpath-vpn.desktop
+          /opt/openpath/OpenPath --smoke-test
+          dpkg -r openpath-vpn
+          test ! -e /opt/openpath/OpenPath
       - uses: actions/upload-artifact@v4
         with:
-          name: openpath-linux
-          if-no-files-found: warn
+          name: openpath-native-linux-x64
+          if-no-files-found: error
           path: |
-            client/linux/dist-installer/*
-            client/linux/dist/**
-            client/linux/cli/dist/**
-            assets/logo.png
+            client/native/dist-installer/*.deb
+            client/native/dist-installer/*.tar.gz
 
-  # ---------- Windows (NSIS + portable) ----------
   windows:
+    name: Windows x64 native app
+    timeout-minutes: 30
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 20 }
-
-      - name: Install deps
-        shell: bash
+        with:
+          ref: ${{ inputs.tag || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          architecture: x64
+      - name: Install native build dependencies
+        run: python -m pip install -r client/native/requirements.txt
+      - name: Test native backend and Qt controls
+        shell: pwsh
         run: |
-          npm install --prefix server 2>&1 | tail -5 || npm ci --prefix server 2>&1 | tail -5 || true
-          npm install --prefix client/desktop 2>&1 | tail -5 || npm ci --prefix client/desktop 2>&1 | tail -5 || true
-          npm install --prefix client/web 2>&1 | tail -5 || npm ci --prefix client/web 2>&1 | tail -5 || true
-
-      - name: Build web renderer
-        shell: bash
-        run: |
-          cd client/web
-          npx vite build 2>&1 | tail -20 || npm run build 2>&1 | tail -20 || true
-
-      - name: Build desktop (NSIS)
+          $env:PYTHONPATH = "$pwd\client\native"
+          $env:QT_QPA_PLATFORM = 'offscreen'
+          $ErrorActionPreference = 'Continue'
+          python -m unittest discover -s client/native/tests -v 2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP\openpath-tests.log"
+          $code = $LASTEXITCODE
+          if ($code -ne 0) {
+            $tail = (Get-Content "$env:RUNNER_TEMP\openpath-tests.log" -Tail 30) -join ' '
+            Write-Output "::error::Native tests failed: $tail"
+            exit $code
+          }
+      - id: version
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          TAG: ${{ inputs.tag || 'v0.0.0-dev' }}
+        run: python client/native/version.py "$TAG" >> "$GITHUB_OUTPUT"
+      - name: Build and smoke-test native executable
+        shell: pwsh
         run: |
-          cd client/desktop
-          npx electron-builder --win nsis portable --publish never 2>&1 | tail -40 || npx electron-builder --win nsis --publish never 2>&1 | tail -40 || echo "windows build partial (expected without cert)"
-          ls -lh dist-installer 2>&1 | head -20 || true
-
-      - name: Build Windows helper (wintun wrapper)
-        shell: bash
+          $ErrorActionPreference = 'Stop'
+          python client/native/make_icons.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m PyInstaller --noconfirm --clean --distpath client/native/dist --workpath client/native/build/pyinstaller client/native/OpenPath.spec
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:QT_QPA_PLATFORM = 'offscreen'
+          $p = Start-Process -FilePath "$pwd\client\native\dist\OpenPath\OpenPath.exe" -ArgumentList '--smoke-test' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { exit $p.ExitCode }
+      - name: Build installer and portable archive
+        shell: pwsh
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          if command -v dotnet >/dev/null; then
-            dotnet build client/windows/OpenPath -c Release 2>&1 | tail -20 || echo "dotnet build skip"
-          else
-            echo "dotnet not available — skip wintun wrapper"
-          fi
-
+          $ErrorActionPreference = 'Stop'
+          $nsis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+          if (!(Test-Path $nsis)) { choco install nsis -y --no-progress; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } }
+          New-Item -ItemType Directory -Force client/native/dist-installer | Out-Null
+          $dir = (Resolve-Path client/native/dist/OpenPath).Path
+          $out = "$pwd\client\native\dist-installer\openpath-$($env:TAG)-windows-x64.exe"
+          & $nsis "/DAPP_VERSION=$env:VERSION" "/DAPP_DIR=$dir" "/DOUTPUT=$out" client/native/installer.nsi
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Compress-Archive -Path client/native/dist/OpenPath -DestinationPath "client/native/dist-installer/openpath-$($env:TAG)-windows-x64.zip"
+      - name: Install, launch and uninstall the Windows app
+        shell: pwsh
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:QT_QPA_PLATFORM = 'offscreen'
+          $installDir = "$env:RUNNER_TEMP\OpenPathInstallerTest"
+          $installer = "$pwd\client\native\dist-installer\openpath-$($env:TAG)-windows-x64.exe"
+          $process = Start-Process -FilePath $installer -ArgumentList @('/S', "/D=$installDir") -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Installer exited with $($process.ExitCode)" }
+          $app = "$installDir\OpenPath.exe"
+          if (!(Test-Path $app)) { throw 'Installer did not create OpenPath.exe' }
+          $process = Start-Process -FilePath $app -ArgumentList '--smoke-test' -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Installed app smoke test exited with $($process.ExitCode)" }
+          $process = Start-Process -FilePath "$installDir\Uninstall.exe" -ArgumentList @('/S', "_?=$installDir") -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Uninstaller exited with $($process.ExitCode)" }
+          if (Test-Path $app) { throw 'Uninstaller did not remove OpenPath.exe' }
       - uses: actions/upload-artifact@v4
         with:
-          name: openpath-windows
-          if-no-files-found: warn
+          name: openpath-native-windows-x64
+          if-no-files-found: error
           path: |
-            client/desktop/dist-installer/*.exe
-            client/desktop/dist-installer/*.zip
-            client/desktop/dist-installer/*.blockmap
-            client/windows/installer/*.exe
+            client/native/dist-installer/*.exe
+            client/native/dist-installer/*.zip
 
-  # ---------- macOS (universal DMG, notarized) ----------
   macos:
-    runs-on: macos-latest
+    name: macOS ${{ matrix.arch }} native app
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            arch: arm64
+            python_arch: arm64
+          - os: macos-15-intel
+            arch: x64
+            python_arch: x64
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 20 }
-
-      - name: Build web + desktop
-        run: |
-          npm install --prefix client/web 2>&1 | tail -5 || npm ci --prefix client/web 2>&1 | tail -5 || true
-          cd client/web && npx vite build 2>&1 | tail -10 || true
-          cd ../..
-          npm install --prefix client/desktop 2>&1 | tail -5 || npm ci --prefix client/desktop 2>&1 | tail -5 || true
-
-      - name: Import certs (if secrets present)
+        with:
+          ref: ${{ inputs.tag || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          architecture: ${{ matrix.python_arch }}
+      - name: Install native build dependencies
+        run: python -m pip install -r client/native/requirements.txt
+      - name: Test native backend and Qt controls
         env:
-          APPLE_CERT_P12: ${{ secrets.APPLE_CERT_P12 }}
-          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
-          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          QT_QPA_PLATFORM: offscreen
+          PYTHONPATH: client/native
+        shell: bash
         run: |
-          if [ -n "$APPLE_CERT_P12" ]; then
-            echo "$APPLE_CERT_P12" | base64 -d > /tmp/cert.p12
-            security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
-            security default-keychain -s build.keychain
-            security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
-            security import /tmp/cert.p12 -k build.keychain -P "$APPLE_CERT_PASSWORD" -T /usr/bin/codesign
-            security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" build.keychain
-          else
-            echo "No Apple cert secrets — building unsigned DMG (local Gatekeeper will warn, xattr -cr to open)"
+          set -uo pipefail
+          set +e
+          python -m unittest discover -s client/native/tests -v 2>&1 | tee "$RUNNER_TEMP/openpath-native-tests.log"
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            echo "::error::Native tests failed: $(tail -n 45 "$RUNNER_TEMP/openpath-native-tests.log" | tr '\n\r' '  ')"
+            exit "$status"
           fi
-
-      - name: Build DMG (universal)
+      - id: version
         env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag || 'v0.0.0-dev' }}
+        run: python client/native/version.py "$TAG" >> "$GITHUB_OUTPUT"
+      - name: Build and smoke-test native application
+        env:
+          QT_QPA_PLATFORM: offscreen
+          OPENPATH_VERSION: ${{ steps.version.outputs.base_version }}
         run: |
-          cd client/desktop
-          npx electron-builder --mac dmg --x64 --arm64 --publish never 2>&1 | tail -40 || npx electron-builder --mac dmg --publish never 2>&1 | tail -40 || echo "mac build partial"
-          ls -lh dist-installer/*.dmg 2>&1 | head -20 || true
-          if [ -n "$APPLE_ID" ]; then
-            xcrun notarytool submit dist-installer/*.dmg --apple-id "$APPLE_ID" --password "$APPLE_ID_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait 2>&1 | tail -20 || true
-            xcrun stapler staple dist-installer/*.dmg 2>&1 | tail -10 || true
-          fi
-
-      - name: Xcode build (NetworkExtension)
-        run: |
-          if command -v xcodebuild >/dev/null; then
-            xcodebuild -project client/macos/OpenPathVPN/OpenPathVPN.xcodeproj -scheme OpenPathVPN -configuration Release build CODE_SIGNING_ALLOWED=NO 2>&1 | tail -20 || echo "xcodebuild skip (needs project)"
-          fi
-
+          set -euo pipefail
+          python client/native/make_icons.py
+          python -m PyInstaller --noconfirm --clean --distpath client/native/dist --workpath client/native/build/pyinstaller client/native/OpenPath.spec
+          client/native/dist/OpenPath.app/Contents/MacOS/OpenPath --smoke-test
+      - name: Package DMG and zip
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          ARCH: ${{ matrix.arch }}
+        run: bash client/native/package_macos.sh "$TAG" "$ARCH"
       - uses: actions/upload-artifact@v4
         with:
-          name: openpath-macos
-          if-no-files-found: warn
+          name: openpath-native-macos-${{ matrix.arch }}
+          if-no-files-found: error
           path: |
-            client/desktop/dist-installer/*.dmg
-            client/desktop/dist-installer/*.zip
-            client/desktop/dist-installer/*.blockmap
-
-  # ---------- Android (APK + AAB) ----------
-  android:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 20 }
-      - uses: actions/setup-go@v5
-        with: { go-version: "1.21" }
-      - uses: actions/setup-java@v5
-        with: { distribution: temurin, java-version: 17 }
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-        continue-on-error: true
-
-      - name: Gomobile AAR
-        run: |
-          go install golang.org/x/mobile/cmd/gomobile@latest 2>&1 | tail -5 || true
-          go install golang.org/x/mobile/cmd/gobind@latest 2>&1 | tail -5 || true
-          export PATH=$PATH:$(go env GOPATH)/bin
-          gomobile init 2>&1 | tail -5 || true
-          if [ -d client/core/go ]; then
-            gomobile bind -target=android -o client/android/app/libs/openpath.aar ./client/core/go 2>&1 | tail -20 || echo "gomobile bind skip (no go pkg)"
-          else
-            mkdir -p client/android/app/libs && echo "stub" > client/android/app/libs/README
-            echo "no go binding dir — stub ok"
-          fi
-
-      - name: Gradle build
-        run: |
-          cd client/android
-          chmod +x gradlew 2>&1 | head -5 || echo "no gradlew (stub)"
-          ./gradlew assembleRelease 2>&1 | tail -30 || gradle assembleRelease 2>&1 | tail -20 || echo "android gradle skip (needs SDK — stub artifact)"
-          ./gradlew bundleRelease 2>&1 | tail -10 || true
-          ls -lh app/build/outputs/apk/release/ 2>&1 | head -20 || ls -lh build/ 2>&1 | head -20 || true
-
-      - name: Sign APK (if keystore secrets)
-        env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: |
-          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
-            echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > /tmp/keystore.jks
-            jarsigner -keystore /tmp/keystore.jks -storepass "$ANDROID_KEYSTORE_PASSWORD" client/android/app/build/outputs/apk/release/app-release-unsigned.apk "$ANDROID_KEY_ALIAS" 2>&1 | tail -10 || true
-            apksigner sign --ks /tmp/keystore.jks --ks-pass pass:"$ANDROID_KEYSTORE_PASSWORD" --out client/android/app/build/outputs/apk/release/openpath-signed.apk client/android/app/build/outputs/apk/release/app-release-unsigned.apk 2>&1 | tail -10 || true
-          else
-            echo "No keystore — unsigned APK ok for PR"
-          fi
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: openpath-android
-          if-no-files-found: warn
-          path: |
-            client/android/app/build/outputs/apk/**/*.apk
-            client/android/app/build/outputs/bundle/**/*.aab
-
-  # ---------- iOS (IPA) ----------
-  ios:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 20 }
-
-      - name: Xcode build IPA (unsigned for PR, signed on tag)
-        env:
-          APPLE_CERT_P12: ${{ secrets.APPLE_CERT_P12 }}
-          PROVISIONING_PROFILE: ${{ secrets.PROVISIONING_PROFILE }}
-        run: |
-          if [ -n "$APPLE_CERT_P12" ] && [ -n "$PROVISIONING_PROFILE" ]; then
-            echo "$PROVISIONING_PROFILE" | base64 -d > /tmp/profile.mobileprovision
-            mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles && cp /tmp/profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/
-          fi
-          xcodebuild -project client/ios/OpenPathVPN/OpenPathVPN.xcodeproj -scheme OpenPathVPN -configuration Release archive -archivePath build/OpenPath.xcarchive CODE_SIGNING_ALLOWED=NO 2>&1 | tail -20 || echo "ios archive skip (stub)"
-          xcodebuild -exportArchive -archivePath build/OpenPath.xcarchive -exportPath build/ipa -exportOptionsPlist client/ios/exportOptions.plist 2>&1 | tail -20 || echo "ios export skip"
-          ls -lh build/ipa/*.ipa 2>&1 | head -10 || true
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: openpath-ios
-          if-no-files-found: warn
-          path: |
-            build/ipa/*.ipa
-            client/ios/**/*.ipa
-
-  # ---------- Release (aggregate) ----------
-  release:
-    if: always() && startsWith(github.ref, 'refs/tags/v')
-    needs: [linux, windows, macos, android, ios, web]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: dist
-          merge-multiple: true
-      - name: Display artifacts
-        run: |
-          echo "Artifacts downloaded for release ${{ github.ref_name }}"
-          ls -R dist 2>&1 | head -100
-          echo "Total files:"
-          find dist -type f | wc -l
-          # Create a simple summary file if no artifacts
-          if [ ! -f dist/web/index.html ] && [ -z "$(find dist -type f | head -1)" ]; then
-            mkdir -p dist/fallback
-            echo "OpenPath VPN ${{ github.ref_name }} — GhostPath stealth" > dist/fallback/README.txt
-            echo "Build artifacts were not available for this tag, but tag was created." >> dist/fallback/README.txt
-          fi
-      - uses: softprops/action-gh-release@v2
-        with:
-          generate_release_notes: true
-          fail_on_unmatched_files: false
-          files: |
-            dist/**/*
-
-  # ---------- Web / Docker ----------
-  web:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: client/web/package-lock.json
-      - run: npm ci --prefix client/web 2>&1 | tail -5 || npm install --prefix client/web 2>&1 | tail -5
-      - run: npm run build --prefix client/web
-      - uses: actions/upload-artifact@v4
-        with:
-          name: openpath-web
-          path: client/web/dist
+            client/native/dist-installer/*.dmg
+            client/native/dist-installer/*.zip

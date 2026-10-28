@@ -1,13 +1,14 @@
 {
   "name": "openpath-desktop",
   "version": "1.0.0",
-  "description": "OpenPath Desktop — Windows/macOS/Linux via Electron + WinTun/tun2socks",
+  "description": "OpenPath desktop dashboard with optional native WireGuard controls",
   "private": true,
   "main": "electron/main.js",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build && electron-builder",
-    "start": "electron electron/main.js"
+    "dev": "electron electron/main.js",
+    "build": "npm --prefix ../web run build && electron-builder --config electron-builder.yml",
+    "start": "electron electron/main.js",
+    "test": "node ../../scripts/run-tests.cjs"
   },
   "dependencies": {
     "ws": "^8.17.0"
@@ -16,5 +17,10 @@
     "electron": "^29.0.0",
     "electron-builder": "^24.0.0",
     "vite": "^5.0.0"
-  }
+  },
+  "author": {
+    "name": "OpenPath Team",
+    "email": "team@openpath.vpn"
+  },
+  "homepage": "https://github.com/mob5824m-wq/OpenPath-VPN"
 }

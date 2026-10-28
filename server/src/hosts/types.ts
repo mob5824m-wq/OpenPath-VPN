@@ -47,6 +47,9 @@ export interface HostListResponse {
     role: 'main';
     name: string;
     version: string;
+    country?: string;
+    region?: string;
+    flag?: string;
   };
   hosts: HostEntry[];      // available sub-hosts (online only by default)
   total: number;           // total registered (including offline if ?all=1)

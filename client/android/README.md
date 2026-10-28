@@ -1,20 +1,28 @@
-# OpenPath Android — Native GUI + CLI Installer
+# OpenPath for Android
 
-> Kotlin VpnService + `openpath-core` AAR with TLS tunneling over 443 and HTTPS mimicry.
+This is a native Android Views app (Android 8.0/API 26 or newer), not a WebView. It uses the official [WireGuard Android tunnel library](https://www.wireguard.com/embedding/) and the system VPN permission. The previous simulated tunnel and fake notification scaffolding has been removed.
 
-## Install (user)
+## Use
 
-- **Play Store**: `OpenPath VPN` (F-Droid build available).
-- **APK (GitHub Releases)**: `openpath-1.0.0-arm64.apk` → Enable unknown sources → install → Allow VPN permission (one tap).
-- **CLI via Termux**: `pkg install nodejs && npm i -g openpath-cli && openpath connect --psk XXX` (uses same TLS mimic, no TUN root needed).
+1. Get a WireGuard `.conf` from an operator who runs a real WireGuard server and has configured your peer. OpenPath does not provision a server or supply profiles.
+2. Open **Profiles → Choose .conf file**. The app accepts one interface and one peer with `0.0.0.0/0` and `::/0` routes. It rejects script hooks, per-app exclusions and unsupported directives. Your original file remains in its original location; protect or delete it separately.
+3. For Stealth, enter the WSS relay address, username and memory-only PSK in **Settings → Stealth relay**. The operator must configure the relay separately; see the [Stealth guide](../../docs/STEALTH.md). Choose Direct or Stealth on Home.
+4. In **Settings**, choose profile DNS (Cloudflare fallback), Quad9 malware filtering, AdGuard DNS filtering, or numeric custom resolvers. These choices affect DNS for the VPN; app-specific DoH and Android Private DNS may bypass filtering.
+5. Return to **Home → Connect WireGuard**, and approve Android's VPN dialog. **Interface active** only means Android and WireGuard started the interface; it does not confirm a handshake, reachable server or protected public traffic. Disconnect explicitly when done.
 
-Split-tunnel: Settings → Apps → choose which apps bypass VPN (e.g., keep school intranet direct).
+The imported profile is encrypted in app-private storage with an AES-GCM key held by Android Keystore. Android backup is disabled. No plaintext fallback is used if the keystore fails. There is no general kill switch, automatic reconnection/Always-on support, per-app split tunneling, or live peer verification. Android can revoke this VPN when another VPN is enabled or stop it if the process is killed. The separate OpenPath WebSocket fetch session is **not implemented in this Android app**. The device Stealth VPN instead protects only its TLS relay socket with Android `VpnService.protect`; it does not exclude the entire app. The pinned WireGuard library service internals are required and the connection fails closed if protection fails. Always-on/lockdown is unsupported, and network changes may require reconnecting.
 
-## Build (developer)
+## Build and test
 
-1. Android Studio Hedgehog+ → open `client/android`.
-2. Go mobile: `go install golang.org/x/mobile/cmd/gomobile@latest && gomobile init && gomobile bind -target=android -o libs/openpath.aar ./client/core/go`
-3. Gradle: `./gradlew assembleRelease` → `app/build/outputs/apk/release/app-release.apk`
-4. Sign with `apksigner`.
+Open `client/android` in Android Studio with Android SDK 36 and JDK 17, or from a terminal:
 
-`OpenVpnService.kt` demonstrates VpnService with Builder API, DoH DNS (1.1.1.1), TLS-wrapped OPSP inside `wss://`.
+```bash
+cd client/android
+./gradlew testDebugUnitTest assembleRelease
+```
+
+The Gradle wrapper pins the distribution checksum. The release APK at `app/build/outputs/apk/release/app-release-unsigned.apk` must be signed before installation. For local development, `./gradlew assembleDebug` creates a debug-signed APK; do not use it to protect real secrets.
+
+The [Android workflow](../../.github/workflows/android.yml) runs Robolectric tests and builds a non-debuggable APK, then signs it with a newly generated **temporary test key**. Its `openpath-android-test-apk` CI artifact (and the similarly named future release asset) is installable for evaluation only. It is not production signing, and because each run has a different certificate, the next build cannot update it in place: uninstall first, which deletes the stored profile. A production release needs a securely managed, persistent signing key and release process. No Play Store or F-Droid listing is claimed.
+
+Unit tests validate the parser, DNS selection, encrypted storage with an injected test key and responsive navigation. The [emulator VPN workflow](../../.github/workflows/android-emulator.yml) also tests Android Keystore and VPN permission, direct and TLS-relayed handshake/TCP traffic to a disposable local WireGuard peer, rejected credentials without direct fallback, and disconnect on an API 30 emulator. It does not verify a physical device, public network routing, DNS filtering or long-term background reliability. Test your own device and server before relying on the VPN.

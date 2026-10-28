@@ -1,0 +1,65 @@
+name: Android emulator VPN smoke
+
+on:
+  push:
+    branches: [main, "arena/**"]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      tag:
+        description: Release tag to check out and exercise
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  vpn:
+    name: Local WireGuard peer on Android emulator
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.sha }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - name: Install relay test dependencies
+        run: npm ci --prefix server
+      - name: Build app and instrumentation APKs
+        shell: bash
+        working-directory: client/android
+        run: |
+          set -uo pipefail
+          status=0
+          ./gradlew --no-daemon --console=plain assembleDebug assembleDebugAndroidTest > "$RUNNER_TEMP/android-emulator-build.log" 2>&1 || status=$?
+          tail -n 80 "$RUNNER_TEMP/android-emulator-build.log"
+          if [ "$status" -ne 0 ]; then
+            grep -E '(^e: | error:| FAILED|FAILURE:|Could not)' "$RUNNER_TEMP/android-emulator-build.log" | head -n 8 | while IFS= read -r line; do echo "::error::${line//%/%25}"; done
+            exit "$status"
+          fi
+      - name: Install the test peer and enable emulator acceleration
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends wireguard-tools
+          test -e /dev/kvm || { echo '::error::KVM is unavailable on this runner'; exit 1; }
+          sudo chmod 666 /dev/kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          target: default
+          arch: x86_64
+          disable-animations: true
+          script: bash scripts/test-android-emulator.sh

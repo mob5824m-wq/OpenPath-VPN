@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- This publicly known CA is trusted ONLY by debuggable CI builds. -->
+<network-security-config>
+    <debug-overrides>
+        <trust-anchors>
+            <certificates src="@raw/stealth_test_ca" />
+        </trust-anchors>
+    </debug-overrides>
+</network-security-config>

@@ -1,10 +1,7 @@
-name: Release — Apps & Profiles
+name: Release — Apps
 
-# Three ways in:
-#  - a v* tag pushed by hand
-#  - the Auto Tag workflow finishing (it pushes the tag with GITHUB_TOKEN, which does
-#    not emit a tag push event, so we listen to workflow_run instead)
-#  - manual dispatch with an explicit tag (used to backfill a missed release)
+# Tags pushed with GITHUB_TOKEN do not emit a push event. The workflow_run
+# trigger publishes the tag made by Auto Tag; manual tags and dispatch work too.
 on:
   push:
     tags: ["v*"]
@@ -22,12 +19,16 @@ permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.event_name }}-${{ github.ref }}
+  group: release-${{ inputs.tag || github.event.workflow_run.head_sha || github.ref }}
   cancel-in-progress: false
 
 jobs:
   resolve:
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch') &&
+       github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.pick.outputs.tag }}
@@ -35,125 +36,163 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Pick the tag to release
-        id: pick
+      - id: pick
+        name: Resolve and validate the exact tag
         shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          MANUAL_TAG: ${{ inputs.tag }}
+          PUSH_TAG: ${{ github.ref_name }}
+          AUTO_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
-          set -e
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.tag }}" ]; then
-            TAG="${{ inputs.tag }}"
-          elif [ "${{ github.event_name }}" = "push" ]; then
-            TAG="${{ github.ref_name }}"
+          set -euo pipefail
+          git fetch --force --tags
+          if [ "$EVENT_NAME" = workflow_dispatch ] && [ -n "$MANUAL_TAG" ]; then
+            TAG="$MANUAL_TAG"
+          elif [ "$EVENT_NAME" = push ]; then
+            TAG="$PUSH_TAG"
           else
-            git fetch --tags --quiet || true
-            TAG="$(git tag -l 'v*' --sort=-v:refname | head -n1)"
+            TAG=''
+            if [ "$EVENT_NAME" = workflow_run ]; then
+              mapfile -t CANDIDATES < <(git tag --points-at "$AUTO_SHA" -l 'v*' --sort=-v:refname)
+            else
+              mapfile -t CANDIDATES < <(git tag -l 'v*' --sort=-v:refname)
+            fi
+            for candidate in "${CANDIDATES[@]}"; do
+              if [[ "$candidate" =~ ^v[0-9]+\.[0-9]+(\.[0-9]+)?(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then TAG="$candidate"; break; fi
+            done
           fi
-          if [ -z "$TAG" ]; then
-            echo "No v* tag found — nothing to release."
-            exit 1
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+(\.[0-9]+)?(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
+            echo "No valid version tag found for this run: $TAG" >&2; exit 1
           fi
-          case "$TAG" in
-            v*) : ;;
-            *) TAG="v$TAG" ;;
-          esac
-          echo "Releasing $TAG"
+          git rev-parse --verify "refs/tags/$TAG^{commit}" >/dev/null
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
-  build-and-release:
+  bundles:
     needs: resolve
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
           ref: ${{ needs.resolve.outputs.tag }}
-
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-
-      - name: Build server
-        continue-on-error: true
+          cache: npm
+          cache-dependency-path: |
+            server/package-lock.json
+            client/web/package-lock.json
+      - name: Build and test server
         run: |
-          cd server
-          npm ci --no-audit --no-fund || npm install --no-audit --no-fund
-          npx tsc --outDir dist
-
-      - name: Build web app
-        continue-on-error: true
+          set -euo pipefail
+          npm ci --prefix server --no-audit --no-fund
+          npm test --prefix server
+          npm run build --prefix server
+      - name: Build and test dashboard
         run: |
-          cd client/web
-          npm ci --no-audit --no-fund || npm install --no-audit --no-fund
-          npm run build
-
-      - name: Snapshot profiles + feature catalog
+          set -euo pipefail
+          npm ci --prefix client/web --no-audit --no-fund
+          npm test --prefix client/web
+          npm run typecheck --prefix client/web
+          npm run build --prefix client/web
+      - name: Test desktop and mobile layouts in Chromium
+        working-directory: client/web
+        shell: bash
         run: |
-          set -e
-          TAG="${{ needs.resolve.outputs.tag }}"
-          mkdir -p _release/artifacts _release/profiles
-          cp -r client/core/src/profiles _release/profiles/ 2>/dev/null || true
-          cp -r client/core/src/features _release/profiles/ 2>/dev/null || true
-          {
-            echo "Release: $TAG"
-            echo "Commit: $(git rev-parse --short HEAD)"
-            echo "Date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          } > _release/profiles/RELEASE.txt
-
-          # Machine-readable profile set shipped with this release
-          node -e '
-            const fs = require("fs");
-            const tag = process.argv[1];
-            const names = ["streaming-us","gaming","anti-censorship","school","home"];
-            const profiles = names.map(id => ({ id }));
-            fs.writeFileSync(
-              "_release/artifacts/profiles-" + tag + ".json",
-              JSON.stringify({ tag, profiles, note: "Profile ids bundled with this release" }, null, 2)
-            );
-          ' "$TAG"
-
-          tar -czf "_release/artifacts/openpath-server-$TAG.tar.gz" -C server dist 2>/dev/null || echo "server dist missing"
-          tar -czf "_release/artifacts/openpath-web-$TAG.tar.gz" -C client/web dist 2>/dev/null || echo "web dist missing"
-          ls -lh _release/artifacts
-
-      - name: Build Linux packages (best effort)
-        continue-on-error: true
+          set -euo pipefail
+          export CHROME_BIN="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
+          npm run test:responsive
+      - name: Create usable release archives
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
         run: |
-          cd client/linux
-          npm ci --no-audit --no-fund --omit=dev || true
-          npx electron-builder --linux AppImage --publish never || echo "AppImage build skipped"
-          TAG="${{ needs.resolve.outputs.tag }}"
-          for f in dist/*.AppImage; do
-            [ -e "$f" ] && cp "$f" "../../_release/artifacts/$(basename "$f" .AppImage)-$TAG.AppImage"
-          done
-          true
+          set -euo pipefail
+          VERSION=$(node -e '
+            let v = process.env.RELEASE_TAG.replace(/^v/, "").replace(/^(\d+\.\d+)(?=-|$)/, "$1.0");
+            if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$/.test(v)) throw new Error("Invalid release version");
+            process.stdout.write(v);
+          ')
+          npm --prefix server version "$VERSION" --no-git-tag-version --allow-same-version
+          mkdir -p _release/artifacts _release/server _release/web
+          cp -r server/dist _release/server/dist
+          cp server/package.json server/package-lock.json _release/server/
+          cp docs/STEALTH.md _release/server/STEALTH.md
+          cat > _release/server/README.txt <<'TEXT'
+          OpenPath server: npm ci --omit=dev, then node dist/index.js.
+          To serve the web archive on the same origin, set WEB_DIST to the extracted web dist directory.
+          For the opt-in device VPN TLS relay, see STEALTH.md, including mandatory backend isolation.
+          Configure real credentials and secure the demo provisioning endpoints before public deployment.
+          TEXT
+          cp -r client/web/dist _release/web/dist
+          cat > _release/web/README.txt <<'TEXT'
+          OpenPath dashboard: serve dist with the OpenPath server by setting WEB_DIST to this dist directory.
+          Alternatively configure your static host to proxy /api, /health, /ops and /fast to the backend.
+          TEXT
+          tar -czf "_release/artifacts/openpath-server-$RELEASE_TAG.tar.gz" -C _release/server .
+          tar -czf "_release/artifacts/openpath-web-$RELEASE_TAG.tar.gz" -C _release/web .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openpath-release-bundles
+          if-no-files-found: error
+          path: _release/artifacts/*
 
-      - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+  native:
+    needs: resolve
+    uses: ./.github/workflows/native-installers.yml
+    with:
+      tag: ${{ needs.resolve.outputs.tag }}
+
+  android:
+    needs: resolve
+    uses: ./.github/workflows/android.yml
+    with:
+      tag: ${{ needs.resolve.outputs.tag }}
+
+  android_emulator:
+    needs: resolve
+    uses: ./.github/workflows/android-emulator.yml
+    with:
+      tag: ${{ needs.resolve.outputs.tag }}
+
+  publish:
+    needs: [resolve, bundles, native, android, android_emulator]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: openpath-release-bundles
+          path: _release/artifacts
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: openpath-native-*
+          merge-multiple: true
+          path: _release/artifacts
+      - uses: actions/download-artifact@v4
+        with:
+          name: openpath-android-test-apk
+          path: _release/artifacts
+      - name: Generate checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd _release/artifacts
+          sha256sum -- * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+      - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.resolve.outputs.tag }}
           name: OpenPath ${{ needs.resolve.outputs.tag }}
-          make_latest: true
-          fail_on_unmatched_files: false
+          prerelease: ${{ contains(needs.resolve.outputs.tag, '-') }}
+          make_latest: ${{ contains(needs.resolve.outputs.tag, '-') && 'false' || 'true' }}
           generate_release_notes: true
+          fail_on_unmatched_files: true
           body: |
-            ## OpenPath VPN ${{ needs.resolve.outputs.tag }}
+            ## OpenPath ${{ needs.resolve.outputs.tag }}
 
-            Apps and profiles for this release.
+            Downloads include the server, web UI testing preview, and native Qt Widgets installers for Linux x64, Windows x64, and macOS Intel/Apple Silicon. The desktop apps do not embed a browser. An Android APK is included for evaluation; it is non-debuggable but signed with a one-off test key and cannot be upgraded in place by a later build. Do not use it for production. iOS installers are not published. Desktop builds are unsigned and macOS builds are not notarized.
 
-            **Apps**
-            - Server (Node) bundle + Web app (Vite) — tarballs below
-            - Linux desktop (Electron) — AppImage when the builder can run in CI
-            - Windows NSIS, macOS DMG, Android APK and iOS extension are produced by
-              the *Native Installers* workflow and attached to its artifacts
+            The device-wide WireGuard connection requires a separately configured WireGuard server and profile; opt-in Stealth also requires a separately configured TLS relay. Windows Stealth disables WireGuard's block-untunneled firewall. Desktop platforms also need system tools and administrator permission. Android requests system VPN permission and has no automatic reconnect. The separate WebSocket session does not route device traffic and is not implemented in the Android app. See the repository documentation for DNS, routing and security limitations.
 
-            **Profiles**
-            - Streaming US, Gaming, Anti-censorship, School, Home
-            - Each carries country, city, NetShield, protocol, NAT, LAN, Connect&Go and
-              custom DNS settings; the set is snapshotted as `profiles-<tag>.json`
-
-            **Updating**
-            - Grab the file for your platform from Assets below
-            - In-app: Settings → Releases lists releases straight from the GitHub API
-          files: |
-            _release/artifacts/*
+            Verify downloads with `SHA256SUMS.txt`. Profiles saved in the app remain local to that device.
+          files: _release/artifacts/*

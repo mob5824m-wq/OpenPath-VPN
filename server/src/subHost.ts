@@ -58,7 +58,7 @@ function getSubConfig(): SubOptions | null {
     wssUrl: effectiveWss,
     duckdnsUrl,
     region: process.env.HOST_REGION || process.env.REGION || 'home',
-    country: process.env.HOST_COUNTRY || 'CA',
+    country: process.env.HOST_COUNTRY || '',
     flag: process.env.HOST_FLAG || '🔗',
   };
 }

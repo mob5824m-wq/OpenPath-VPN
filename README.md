@@ -1,270 +1,90 @@
-# OpenPath VPN — GhostPath Stealth Protocol
+# OpenPath VPN
 
-> **“If they can’t tell it’s a VPN, they can’t block it.”**
+OpenPath provides a **native Qt Widgets desktop app** for Linux, Windows and macOS, a native Android app, a server, and a separate web UI preview. The desktop and Android apps are not browser wrappers and do not embed a webview. The old Electron projects remain in the repository as legacy code; they are not used for the desktop releases.
 
-Cross-platform VPN that **wraps all traffic inside TLS over TCP :443** with **HTTPS traffic mimicry** so it looks like standard web browsing. Even if your school enables “Block VPNs” on **Fortinet FortiGate** / Palo Alto / Lightspeed, OpenPath stays up — because it *is* HTTPS.
+There are two distinct connections:
 
-> **Fortinet school?** → See [`docs/FORTINET.md`](docs/FORTINET.md) — FortiGuard *Business/CDN* (not Proxy Avoidance), App Control bypass, SSL Deep Inspection double-encryption, explicit proxy `CONNECT`, and `openpath connect --fortinet` one-liner. Test with `scripts/test-fortinet.sh`.
+1. **Device-wide VPN:** desktop apps control an operator-provided WireGuard tunnel using system tools; Android uses the official WireGuard library and Android VPN service. Choose direct UDP or opt-in Stealth (WireGuard encapsulated in an HTTPS WebSocket over TLS/TCP to a configured relay). The relay does not create or operate the WireGuard server, and Stealth is not guaranteed to be indistinguishable from HTTPS or bypass restrictions.
+2. **WebSocket session:** the desktop app and web preview can connect to an OpenPath server and send individual HTTP GET requests through it. This session is not implemented in Android and does **not** route other apps or browser tabs. `wss://` uses TLS; `ws://` is unencrypted.
 
-![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Android%20%7C%20iOS%20%7C%20Chromebook-blue)
-![TLS](https://img.shields.io/badge/TLS-obfuscation%20inside%20TCP%3A443-0ea5e9)
-![Mimic](https://img.shields.io/badge/mimic-HTTPS%20browsing%20%2B%20decoy-6366f1)
-![Protocol](https://img.shields.io/badge/protocol-OPSP%20v1%20GhostPath-purple)
-![License](https://img.shields.io/badge/license-MIT-green)
+> **Security:** The supplied demo PSK and unauthenticated provisioning/host-registration endpoints are not production-safe. Use the demo only on a trusted network; secure or disable these endpoints before exposing a server. The device VPN has no general kill switch, and an active interface alone does not prove a peer handshake or internet connectivity. Inspect routes and verify your setup independently before relying on it for privacy.
 
----
+## Native desktop app
 
-## 🔒 Stealth layers (new)
-
-### TLS Obfuscation — inside TLS tunneling over TCP
-All bytes leave the device as `TLSv1.3 Application Data` on **TCP 443**:
-- Real TLS 1.3 with SNI `cdn.yourdomain.com` (your Cloudflare domain), ALPN `h2`, cert Let's Encrypt — DPI sees `Business/Cloudflare`, not `VPN/Proxy`.
-- JA3 / JA4 fingerprint cloned from **Chrome 124 / Safari 17 / Firefox 128** — FortiGate maps to *browser*, not Go/Node TLS.
-- Domain fronting optional (SNI= `www.microsoft.com`, inner Host= your domain).
-- Inner OPSP still ChaCha20-Poly1305 — double-encrypted even under school MitM CA.
-
-Read: [`protocol/TLS-OBFUSCATION.md`](protocol/TLS-OBFUSCATION.md)
-
-### Traffic Mimicry — HTTPS browsing illusion
-Makes the tunnel *choose not to be blocked*:
-- Packet sizes follow **web histogram** (60B ACKs / ~1200B HTML / 1460B images) via seeded PRNG — no flat 1420B VPN peak.
-- Timing **jitter 2-60 ms** + burst coalescing like browser pipelining.
-- Real browser headers (`User-Agent`, `Origin`, `Sec-Fetch-Dest`, `Accept-Language`) on upgrade + cover fetches (`GET /`, `/styles.css`).
-- **Decoy site** on `/` — unauth `curl` → 200 portfolio HTML (Shodan/Censys = “personal site”).
-- Profiles: `chrome124` (default) / `safari17` / `firefox128` / `meet`.
-
-Read: [`protocol/TRAFFIC-MIMICRY.md`](protocol/TRAFFIC-MIMICRY.md)
-
----
-
-## Why schools can't block it
-
-| School Tries | OpenPath Does |
-|---|---|
-| Block VPN ports (1194, 51820, 500…) | **Only 443/TCP** (same as Classroom/YouTube) — inside TLS |
-| DPI on WireGuard/OpenVPN handshake | Handshake **PSK-encrypted + random-padded** — looks like TLS payload |
-| SNI filter on `*.vpn.com` | SNI = **`cdn.yourdomain.com` on Cloudflare** — whitelisted |
-| IP blocklist of Nord/Express | **Your $4/mo VPS** — IP never on VPN lists; Cloudflare front |
-| Active probe without auth | Decoy **portfolio 200 OK** + 200-800ms tarpit |
-| DNS poison | **DoH to 1.1.1.1 over 443** — zero school DNS |
-| ML on sizes/timing | **Web histogram + jitter** — classifier scores benign |
-
-**Demo:** `curl https://cdn.yours.com/` → portfolio. Only `GET /ops?auth=HMAC` → 101 WebSocket. Wireshark shows `TLSv1.3 + WebSocket` only — like Slack/Notion.
-
-Full breakdown: [`docs/BYPASS_TECHNIQUES.md`](docs/BYPASS_TECHNIQUES.md) • Spec: [`protocol/SPEC.md`](protocol/SPEC.md)
-
----
-
-## Live Demo (this repo)
-
-### ▶ Preview dashboard (PWA + GUI)
+Download a desktop installer from a release that includes one, or run from source with Python 3.10–3.13. On Linux or macOS:
 
 ```bash
-# 1. Server (decoy + TLS-terminated stealth VPN on 4433)
-cd server && npm install && npm run dev   # or docker compose up
-
-# 2. Web client (also serves as Linux/Windows/macOS preview)
-cd client/web && npm install && npm run dev
-# → http://localhost:5173  (preview host 5173-xxx.e2b.app in Arena)
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -r client/native/requirements.txt
+python client/native/entry.py
 ```
 
-In preview: **Connect Stealth Tunnel** → live logs show `TLS 1.3 SNI=… ALPN=h2 → decoy fetch → Upgrade: websocket → tunnel UP` → **Fetch via VPN** to prove egress.
+On Windows PowerShell:
 
-### Quick connect (any machine)
-
-```
-Server:  wss://cdn.openpath.example.com/ops
-User:    demo
-PSK:     demo-student-key-do-not-use-prod   (change in prod!)
-URI:     openpath://cdn.example.com:443/ops?psk=...&user=demo#demo
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r client/native/requirements.txt
+python client/native/entry.py
 ```
 
-`POST /api/provision` → PSK + QR for AirDrop.
+The **Home** page imports a WireGuard profile and starts or stops the device VPN. To use the separate OpenPath WebSocket session, enter your server URL and username in **Settings**, select **Save server settings**, and enter the PSK. Then open **Session** to refresh advertised locations, choose a server and mode, and connect or fetch a single URL through it. The PSK stays in process memory and is never saved by the app. **Releases** lists real published GitHub assets and opens selected downloads or the release page in the system browser. See [native desktop development and packaging](client/native/README.md).
 
----
+### Device-wide WireGuard VPN
 
-## All Platforms — native apps + installers (GUI & CLI)
+A server operator must first configure a WireGuard server and a dedicated peer profile for this device, including forwarding, firewall/NAT, DNS and working IPv4/IPv6 routes.
 
-Same stealth core (`client/core` TS) with platform TUN:
+1. Install the OS prerequisites below and unlock your system keychain.
+2. Import the operator's `.conf` file. The supported profile contains one `[Interface]` followed by one `[Peer]`, an endpoint and `AllowedIPs = 0.0.0.0/0, ::/0`. An IPv6 interface address and server-side IPv6 support are needed for working IPv6 traffic. Only IP-address DNS entries are accepted. Hook commands, `Table` and other unsupported directives are rejected before elevation.
+3. Choose a DNS policy and Direct or Stealth transport, select **Connect device VPN** and approve the administrator prompt. Stealth also needs a separately configured relay and its WSS credentials in Settings; see the [Stealth operator and client guide](docs/STEALTH.md). Use **Disconnect** when finished. The WebSocket fetch session is independent.
 
-| OS | Native Tech | GUI | CLI | Installer |
-|---|---|---|---|---|
-| **Linux** ✅ new | Electron + `ip tuntap` kernel TUN (`tun0 10.89.0.2/24`) / SOCKS fallback; GNOME proxy; tray + autostart | `openpath-gui` | `openpath connect/status/disconnect/config` | **.deb / .rpm / .AppImage** (`client/linux/README.md`) |
-| **Windows 10/11** | Electron + **WinTun** (`wintun.dll`) + WinIP | `OpenPath.exe` | `openpath.exe connect …` | **Setup.exe (NSIS)** / `winget install OpenPath.VPN` |
-| **macOS 12+** (Intel+M1) | Swift **NetworkExtension** `PacketTunnelProvider` + `utun` | `OpenPath.app` | `openpath` symlink | **DMG universal** / `brew cask` |
-| **Android 8+** | Kotlin **VpnService** + Gomobile AAR | APK GUI | Termux `openpath` | **APK** / Play Store |
-| **iOS 15+** | Swift **NetworkExtension** | App + Shortcuts | — | **IPA** / TestFlight / App Store |
-| **Chromebook** | PWA + Chrome Extension (`chrome.proxy`) | Web tab | — | No install needed |
+NetShield/DNS choices are **unfiltered** (the profile's DNS, or Cloudflare if omitted), **malware** (Quad9), **ads/malware/trackers** (AdGuard DNS), or custom resolver IPs. These are third-party DNS services, not an OpenPath-maintained blocklist. Apps using their own encrypted DNS, local-network routes, or other network configurations can bypass filtering. A changed choice applies on the next device connection.
 
-Even on locked-down Chromebooks where MDM blocks apps, the **PWA works** — it's a website fetch inside TLS.
+**Prerequisites:**
 
-Per-OS build instructions in `client/<platform>/README.md` (each now documents GUI + CLI + installer).
+- **Linux:** `wg`, `wg-quick`, `iproute2`, `resolvconf` or `openresolv`, polkit/`pkexec` (unless running as root), kernel WireGuard or its supported userspace implementation, and an unlocked Secret Service-compatible keychain such as GNOME Keyring. DNS setup depends on the host's `resolvconf` integration.
+- **macOS:** WireGuard tools including `wg-quick`, `wg` and `wireguard-go` (for example via Homebrew's `wireguard-tools` package), an unlocked Keychain, and administrator authorization.
+- **Windows:** the official WireGuard for Windows application and Windows Credential Manager. The app requests UAC authorization to install/remove a tunnel service. Windows' credential store protects the saved profile, but the service also needs a **plaintext** configuration while installed, in a directory restricted to the current user and SYSTEM. Administrators can still access it. The service can restart with Windows; disconnect removes it and the plaintext file when removal is confirmed.
 
-### Linux — 1-line install
+Linux/macOS use restricted temporary plaintext configuration files for `wg-quick` and normally remove them after each command; an abrupt process or system crash can leave them or network changes behind. A direct VPN is **not** automatically disconnected when the app closes. Stealth requires the app to remain open; after a crash its interface can remain active with an unavailable loopback endpoint. The app refuses to stop an interface whose ownership it cannot confirm, but its local ownership marker is not a security boundary. If start/stop is interrupted or ownership is ambiguous, inspect and clean up with the original WireGuard/system tools. Disconnecting does not require the profile keychain to remain unlocked. No peer-handshake verification, automatic kill switch, LAN exclusion guarantee, or guarantee of IPv6 connectivity is provided.
+
+## Native Android app
+
+The Android app imports an operator-supplied WireGuard profile, encrypts it with Android Keystore, requests Android VPN permission and offers DNS resolver choices and Direct/Stealth transports. It uses native views with phone and tablet layouts; it does not implement the separate WebSocket session. Android can stop or revoke the VPN, and this app does not provide Always-on or automatic reconnection. See [Android instructions and limitations](client/android/README.md).
+
+CI builds a non-debuggable, **test-signed** APK for evaluation. Its signing key changes each build, so later builds cannot update it in place; uninstalling removes its stored profile. A production release needs a persistent, securely managed signing key. A local WireGuard handshake and TCP traffic have been verified on an Android emulator; see the [Stealth guide](docs/STEALTH.md) for transport testing and limitations. Physical-device and public-network behavior remain unverified.
+
+## Web UI preview and server
+
+The web UI is a **testing preview**, not the shipped desktop application. It uses a sidebar at desktop widths and bottom navigation on phones. Requires Node.js 20 or newer. Start the server and preview in separate terminals:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mob5824m-wq/OpenPath-VPN/main/client/linux/installers/install.sh | bash
-openpath config set psk YOUR_PSK
-# Fortinet school (FortiGate App Control + FortiGuard Web Filter) — use --fortinet:
-openpath connect --fortinet --server wss://cdn.yourdomain.com/ops --psk XXX
-# generic
-openpath connect --server wss://cdn.yourdomain.com/ops --profile chrome124
-openpath status
-openpath-gui   # GUI with tray, autostart toggle, live TLS log (pick Fortinet profile)
+cd server && npm ci && npm run dev
+cd client/web && npm ci && npm run dev
 ```
 
-From source:
-```bash
-cd client/linux/cli && npm install && npm run build && sudo npm link  # CLI
-cd client/linux && npm install && npm run pack:appimage                # GUI → OpenPath-*.AppImage
-```
+Open the Vite address shown in the terminal. Quick Connect opens a WebSocket session; Countries shows actually advertised online hosts. The preview stores non-secret profiles and settings locally and keeps the PSK in tab memory. Its default server address uses the preview's own origin, so a reverse proxy must forward `/api`, `/health`, `/ops` and `/fast` to the backend. Vite does this in development; set `OPENPATH_BACKEND_URL` to change its backend. Docker Compose builds the server and preview and serves the latter on port `4173`.
 
-**TUN on Linux**: `sudo openpath connect` → kernel TUN captures all traffic; without sudo → SOCKS fallback `127.0.0.1:1080` (auto GNOME proxy).
+The demo fetch supports GET/HEAD only, blocks private, loopback and reserved IPs including on redirects, pins checked DNS results and limits responses to 6,000 bytes. `POST /api/provision` returns the demo PSK without authentication and must not be exposed to untrusted clients.
 
----
+## Releases and packaging
 
-## CLI — all platforms (works over SSH)
+The **Native Installers** workflow builds Qt/PyInstaller applications and runs native control/backend tests and a packaged-app smoke test on each platform. It produces Linux x64 `.deb` and portable `.tar.gz`, Windows x64 NSIS `.exe` and `.zip`, and macOS Intel and Apple Silicon `.dmg` and `.zip`. The release workflow publishes those along with server/web-preview archives and SHA-256 checksums only after the build and Android-emulator VPN smoke test succeed, using the exact release tag. A manual Native Installers run without a tag creates CI artifacts without publishing. Desktop builds are unsigned and macOS builds are not notarized; OS security prompts may appear. The Android workflow produces an installable, non-debuggable APK signed with an ephemeral **test key**, not a production signing key. Future releases include that test APK and its checksum; it cannot be updated in place by later builds. iOS installers are not produced. Existing releases are not retroactively changed; a new release is needed for new installers.
 
-All native apps expose the same CLI:
+For a downloaded server archive, run `npm ci --omit=dev` then `npm start`. Set `WEB_DIST` to the extracted web-preview archive's `dist` directory to serve it and the API from one origin, or configure the reverse proxy described above. Verify downloaded files with `SHA256SUMS.txt`.
+
+## Tests and development
 
 ```bash
-openpath connect --server wss://cdn.example.com/ops --psk <PSK> [--user demo] [--profile safari17|fortinet] [--fortinet] [--sni ajax.googleapis.com] [--pin]
-openpath connect --fortinet --server wss://cdn.yourdomain.com/ops --psk XXX  # FortiGate school shortcut
-openpath status                   # TLS fingerprint (JA3), TUN mode, RTT, RX/TX, FortiGate CA warning
-openpath disconnect
-openpath config get|set|path      # ~/.config/openpath/config.json (600)
+PYTHONPATH=client/native python -m unittest discover -s client/native/tests -v
+(cd server && npm ci && npm test && npm run build)
+(cd client/web && npm ci && npm test && npm run typecheck && npm run build)
+# For real-browser layout tests, point CHROME_BIN to an installed Chrome/Chromium:
+(cd client/web && CHROME_BIN=/usr/bin/google-chrome npm run test:responsive)
+(cd client/android && ./gradlew testDebugUnitTest assembleRelease)
 ```
 
-Universal `client/cli` delegates to `client/linux/cli` — build once, run everywhere.
+On headless Linux, Qt tests need the usual system Qt graphics libraries and `QT_QPA_PLATFORM=offscreen`. Most system-command tests are mocked; the Linux Stealth workflow additionally runs a real kernel WireGuard relay test in isolated network namespaces. Real device tunnels require OS privileges and an operator-controlled server. The repository also contains legacy Electron GUIs and experimental TUN, CLI and iOS scaffolding. They are not the native desktop or Android release apps or a completed alternative WireGuard implementation. See [protocol specifications](protocol/SPEC.md) and [architecture notes](docs/ARCHITECTURE.md) as design documents, not security guarantees.
 
-## GUI — all platforms
-
-- Server/PSK/User fields, profile selector, jitter/padding/domain-front toggles
-- Live log: `TLS 1.3 SNI=… → decoy → Upgrade: websocket → padding+jitter → TUN UP`
-- Stats: RX/TX, RTT, uptime, TUN mode, decoy status
-- Tray + autostart (Linux `.desktop` in `~/.config/autostart`, macOS Login Item, Windows Startup)
-- System theme aware, native installers (deb/rpm/AppImage/NSIS/DMG/APK/IPA).
-
----
-
-## Pluggable Transports (auto-failover inside TLS)
-
-Client races transports; first handshake wins. QoS throttle → hot-swap <1s (same TLS SNI).
-
-| Transport | Mimics | Port | Note |
-|---|---|---|---|
-| **WebSocket over TLS** (primary) | Slack/Notion live | 443 TCP | Full |
-| HTTP/2 streaming | Drive upload `POST /api/upload` | 443 TCP | Full |
-| DNS-over-HTTPS | Firefox DoH to `cloudflare-dns.com` | 443 | ~40 kbps |
-| QUIC | YouTube HTTP/3 | 443 UDP | Full (opportunistic) |
-| WebRTC DataChannel | Meet video call | UDP | Full |
-
-All remain inside TLS if available — same SNI, same cert.
-
----
-
-## Deploy your own server (5 min, custom domain = not on blocklists)
-
-**DuckDNS (free, home server / Raspberry Pi — no static IP needed):**
-```bash
-# 1. Create free domain at https://www.duckdns.org → e.g. openpath42.duckdns.org
-cp .env.duckdns.example .env  # set DUCKDNS_DOMAIN + DUCKDNS_TOKEN + PSK
-docker compose -f docker-compose.duckdns.yml up -d --build  # Caddy auto-issues Let's Encrypt for *.duckdns.org
-curl -I https://openpath42.duckdns.org/health   # → 200
-sudo ./scripts/install-duckdns-cron.sh           # auto-refresh IP every 5 min
-```
-Full guide: [`docs/DUCKDNS.md`](docs/DUCKDNS.md) — port forwarding (80/443), DNS-01 if ISP blocks 80, GitHub Action to auto-refresh IP (`DUCKDNS_TOKEN` secret + `duckdns.yml` workflow).
-
-**VPS ($4/mo):**
-```bash
-git clone https://github.com/mob5824m-wq/OpenPath-VPN
-cd OpenPath-VPN
-docker compose up -d   # 4433 → add Let's Encrypt or Cloudflare Tunnel
-# Point cdn.openpath.yourdomain.com → VPS IP (Cloudflare proxy ON)
-docker exec openpath-server npm run gen-psk  # → openpath:// URI + QR
-```
-
-**No public IP (Cloudflare Tunnel):**
-```bash
-cloudflared tunnel create openpath && cloudflared tunnel route dns openpath cdn.yourdomain.com
-docker compose -f docker-compose.tunnel.yml up -d
-```
-
-Fronting: firewall sees Cloudflare `1.1.1.x`, not VPS. Rotate origin if IP ever flagged. Decoy `GET /` → portfolio; only `GET /ops?auth=HMAC` → VPN.
-
-## Crypto (auditable)
-
-- **KEX:** X25519 ephemeral → HKDF-SHA256(`openpath-v1` || nonces) → session key
-- **AEAD:** XChaCha20-Poly1305 / AES-256-GCM, PFS, wiped on disconnect
-- **Auth:** HMAC-SHA256(PSK, `timestamp.nonce.path`) constant-time, replay cache 10k/60s, 5 fails → 5-min tarpit
-- **Obfuscation:** per-session magic, encrypted len, 0-512B web-histogram pad, jitter 2-60ms, keepalive 15-45s random, JA3=Chrome124, ALPN `h2`.
-
-See [`protocol/SPEC.md`](protocol/SPEC.md) • [`protocol/TLS-OBFUSCATION.md`](protocol/TLS-OBFUSCATION.md) • [`protocol/TRAFFIC-MIMICRY.md`](protocol/TRAFFIC-MIMICRY.md)
-
----
-
-## Project Layout
-
-```
-OpenPath-VPN/
-├── protocol/SPEC.md, TLS-OBFUSCATION.md, TRAFFIC-MIMICRY.md
-├── docs/BYPASS_TECHNIQUES.md, ARCHITECTURE.md
-├── server/                   # Node.js stealth server + decoy + proxy
-│   ├── src/transports/tls_tunnel.ts, https_mimic.ts, websocket.ts
-│   └── src/utils/crypto.ts, obfuscation.ts
-├── client/
-│   ├── core/                 # TS shared (HS, AEAD, transports incl tls_tunnel + https_mimic)
-│   ├── cli/                  # Universal CLI (delegates to linux/cli everywhere)
-│   ├── linux/                # NEW native Linux GUI+CLI
-│   │   ├── src/main.ts, tun-linux.ts, tray.ts, renderer/  # Electron + TUN + GNOME
-│   │   ├── cli/src/commands/*  # connect/disconnect/status/config with TLS+SNI mimic
-│   │   ├── installers/install.sh, .desktop, electron-builder.yml
-│   │   └── vite.config.ts
-│   ├── desktop/              # Electron all-platforms (reuses core)
-│   ├── windows/              # WinTun C# + NSIS guide
-│   ├── macos/                # NetworkExtension + DMG
-│   ├── android/              # VpnService Kotlin + Gradle
-│   ├── ios/                  # NetworkExtension Swift
-│   └── web/                  # Vite/React PWA — preview
-├── scripts/build-all.sh, build-linux.sh, test-stealth.sh
-└── docker-compose.yml
-```
-
----
-
-## Testing stealth
-
-```bash
-./scripts/test-stealth.sh --target cdn.openpath.example.com:443
-# JA3=Chrome, no VPN sig, decoy 200, probe 404, entropy, padding
-
-# Linux CLI
-openpath status                 # shows JA3 profile, TUN mode, RTT
-sudo tcpdump -i tun0 -w cap.pcap port 443
-wireshark cap.pcap  # → TLSv1.3 only, JA3 Chrome124
-```
-
-## Build all installers
-
-```bash
-./scripts/build-all.sh
-# Linux
-cd client/linux && npm run pack:deb && npm run pack:appimage
-# Windows/macOS (needs electron-builder + platform)
-cd client/desktop && npx electron-builder --win nsis --mac dmg --linux deb
-# Android
-cd client/android && ./gradlew assembleRelease
-```
-
-Artifacts in `dist-installer/` and GitHub Releases workflow `.github/workflows/build.yml`.
-
----
-
-## Ethics
-
-Built for privacy and legitimate access (research, docs, comms). Respect acceptable-use policies and local laws. Authors not responsible for misuse.
-
----
-
-MIT © mob5824 — contributions welcome.  
-*“Privacy is not about hiding; it’s about consent.”*
+MIT license. Use responsibly and comply with applicable policies and laws.

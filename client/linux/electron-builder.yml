@@ -9,14 +9,19 @@ files:
   - cli/dist/**
   - installers/**
   - package.json
+extraResources:
+  - from: ../desktop/electron/device-vpn.js
+    to: native/device-vpn.js
+  - from: ../desktop/electron/device-ipc.js
+    to: native/device-ipc.js
 linux:
   category: Network
   maintainer: OpenPath Team <team@openpath.vpn>
   target: [deb, rpm, AppImage]
-  icon: installers/icon.png
+  icon: ../../assets/icon-512.png
   desktop:
     Name: OpenPath VPN
-    Comment: Stealth VPN that looks like HTTPS • TLS inside 443
+    Comment: WebSocket sessions and optional WireGuard device VPN
     StartupWMClass: openpath
   executableName: openpath-gui
 deb:

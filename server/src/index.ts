@@ -1,39 +1,51 @@
 import express from 'express';
 import cors from 'cors';
 import http from 'http';
+import path from 'node:path';
+import { readFileSync } from 'node:fs';
 import { WebSocketServer, WebSocket } from 'ws';
 import { config } from './config.js';
 import { validateAuth, buildAuthToken } from './auth.js';
 import { decoyHtml } from './decoy.js';
 import { createSession, encryptFrame, decryptFrame, sessions, FrameType, fastEncode, fastDecode } from './transports/websocket.js';
 import { forwardHttpRequest } from './proxy/forwarder.js';
+import { ReleaseService } from './releases.js';
 import hostsRouter from './hosts/routes.js';
 import { startRegistryPruner, listHosts } from './hosts/registry.js';
 import { startSubRegistration } from './subHost.js';
+import { StealthRelayServer, STEALTH_PATH, parseRelayPsks } from './stealth/relay.js';
 
+const packageVersion = (JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {version:string}).version;
 const app = express();
 app.use(cors());
+const relayOnly = process.env.STEALTH_RELAY_ONLY === '1';
+// For a public relay, expose only the relay and a minimal health check. The
+// legacy provision/registration/session endpoints are not production-safe.
+app.use((req, res, next) => {
+  if (relayOnly && req.path !== '/health') { res.sendStatus(404); return; }
+  next();
+});
 app.use(express.json());
 
 // --- Health & API (with host role) ---
 app.get('/health', (_req,res)=> res.json({
-  ok:true, version:'1.0.0', role: config.role, hostId: config.hostId, sessions: sessions.size, uptime: process.uptime(), hosts: listHosts().online,
+  ok:true, version:packageVersion, role: config.role, hostId: config.hostId, sessions: sessions.size, uptime: process.uptime(), hosts: listHosts().online,
   modes: ['stealth','fast','dual'], mode: config.vpnMode, fastPath: config.fastPath,
 }));
 app.get('/api/info', (_req,res)=> res.json({
   name: 'OpenPath-VPN Server',
-  protocol: 'OPSP v1 (GhostPath + Fast)',
+  protocol: 'OpenPath WebSocket sessions',
   role: config.role, hostId: config.hostId, hostName: config.hostName,
-  transports: ['wss','https-stream','doh','quic','webrtc'],
-  modes: { stealth: `${config.opsPath} (over TLS mimicry, Fortinet-safe, ~30% overhead)`, fast: `${config.fastPath} (raw WS, no obfuscation, ~3x faster, for home/trusted WiFi)` },
-  port: config.port, decoy: true, opsPath: config.opsPath, fastPath: config.fastPath, vpnMode: config.vpnMode,
+  transports: ['websocket'],
+  modes: { stealth: `${config.opsPath} WebSocket session`, fast: `${config.fastPath} WebSocket session` },
+  port: config.port, decoy: !process.env.WEB_DIST, opsPath: config.opsPath, fastPath: config.fastPath, vpnMode: config.vpnMode,
 }));
 // Fast info endpoint for client toggle
 app.get('/api/modes', (_req,res)=> res.json({
   current: config.vpnMode,
   available: [
-    { id:'stealth', name:'GhostPath Stealth', path: config.opsPath, desc:'TLS inside TLS, JA3 mimicry, bypass Fortinet. Use at school/work. ~70 Mbit cap due to double-crypto.' },
-    { id:'fast', name:'Home Turbo', path: config.fastPath, desc:'Plain WireGuard-like over WS, no obfuscation. ~200-500 Mbit, low latency. Use at home/trusted nets.' },
+    { id:'stealth', name:'Stealth', path: config.opsPath, desc:'WebSocket session. Use wss:// through a TLS-terminating proxy for transport encryption.' },
+    { id:'fast', name:'Turbo', path: config.fastPath, desc:'Alternative WebSocket session. It is not a WireGuard tunnel.' },
   ]
 }));
 app.get('/api/stats', (_req,res)=>{
@@ -51,6 +63,13 @@ app.post('/api/provision', (req,res)=>{
 });
 // Host directory: main lists sub-hosts, sub registers here
 app.use('/api', hostsRouter);
+
+const releaseService = new ReleaseService();
+app.get('/api/releases', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try { res.json(await releaseService.get(req.query.refresh === '1')); }
+  catch (error) { res.status(502).json({ error: (error as Error).message || 'Could not load releases' }); }
+});
 
 // --- DoH fallback tunnel (simplified) ---
 app.get('/dns-query', (req,res)=>{
@@ -76,12 +95,16 @@ app.post('/api/upload', (req,res)=>{
 
 app.get('/api/ip', (req,res)=>{
   const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || (req.socket.remoteAddress||'').replace('::ffff:','') || 'unknown';
-  res.json({ ip, country: 'CA', city: 'Unknown', via: 'openpath' });
+  res.json({ ip, country: null, city: null, via: 'openpath' });
 });
 app.get('/api/client-ip', (req,res)=>{
   const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || (req.socket.remoteAddress||'').replace('::ffff:','') || 'unknown';
   res.json({ ip });
 });
+
+// A release's static dashboard can optionally be hosted by this server on the
+// same origin as its API/WebSocket endpoints. Without WEB_DIST the decoy remains.
+if (process.env.WEB_DIST) app.use(express.static(path.resolve(process.env.WEB_DIST), { dotfiles:'deny' }));
 
 // --- Decoy website (must be last GET) ---
 app.get('/', (_req,res)=>{
@@ -100,9 +123,24 @@ const server = http.createServer(app);
 
 const wss = new WebSocketServer({ noServer: true });
 const fastWss = new WebSocketServer({ noServer: true });
+const stealthTarget = process.env.STEALTH_WG_TARGET || '';
+const relayPsks = parseRelayPsks(process.env.STEALTH_PSKS || '', !!stealthTarget);
+if (stealthTarget && Object.values(relayPsks).some(secret => Object.values(config.psks).includes(secret))) {
+  throw new Error('STEALTH_PSKS must not reuse a legacy session/provisioning PSK');
+}
+const stealthRelay = new StealthRelayServer(stealthTarget, process.env.STEALTH_TRUST_PROXY === '1', relayPsks);
 
 server.on('upgrade', (req, socket, head)=>{
   const url = new URL(req.url || '/', `http://${req.headers.host}`);
+  if (url.pathname === STEALTH_PATH) {
+    stealthRelay.handleUpgrade(req, socket, head, url);
+    return;
+  }
+  if (relayOnly) {
+    socket.write('HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n');
+    socket.destroy();
+    return;
+  }
   const isFast = url.pathname.startsWith(config.fastPath) || url.searchParams.get('mode') === 'fast' || url.searchParams.get('fast') === '1';
   const pathOk = url.pathname.startsWith(config.opsPath) || url.pathname.startsWith(config.fastPath);
   if (!pathOk) {
@@ -119,7 +157,8 @@ server.on('upgrade', (req, socket, head)=>{
       socket.write(`HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\nContent-Length: 0\r\n\r\n`);
       socket.destroy();
     }, delay).unref?.();
-    console.log(`[auth-fail] ${ip} reason=${authRes.reason} url=${url.pathname}${url.search}`);
+    // Never put authentication query tokens in server logs.
+    console.log(`[auth-fail] ${ip} reason=${authRes.reason} path=${url.pathname}`);
     return;
   }
   if ((req as any)._isFast) {
@@ -137,7 +176,7 @@ wss.on('connection', (ws: WebSocket, req: any, user: string)=>{
   const session = createSession(ws, user);
   console.log(`[connect] user=${user} id=${session.id} ua=${req.headers['user-agent']?.slice(0,60)}`);
   // hello sent as plain JSON for web demo (client has no AES key yet) + encrypted variant optional
-  const hello = Buffer.from(JSON.stringify({ t:'hello', id: session.id, user, serverTime: Date.now(), transports:['wss','h2','doh'], mode:'stealth' }));
+  const hello = Buffer.from(JSON.stringify({ t:'hello', id: session.id, user, serverTime: Date.now(), transports:['websocket'], mode:'stealth' }));
   ws.send(hello);
 
   let alive = true;
@@ -178,7 +217,7 @@ wss.on('connection', (ws: WebSocket, req: any, user: string)=>{
       if (msg.op === 'fetch' && msg.url) {
         handled = true;
         const out = await forwardHttpRequest({ url: msg.url, method: msg.method, headers: msg.headers });
-        const resp = Buffer.from(JSON.stringify({ op:'fetch-res', id: msg.id, status: out.status, headers: out.headers, body: out.body.toString('base64').slice(0, 8000) }));
+        const resp = Buffer.from(JSON.stringify({ op:'fetch-res', id: msg.id, status: out.status, headers: out.headers, body: out.body.toString('base64'), truncated: out.truncated }));
         const enc = dec ? encryptFrame(session, resp) : resp;
         session.txBytes += enc.length;
         ws.send(enc);
@@ -190,7 +229,7 @@ wss.on('connection', (ws: WebSocket, req: any, user: string)=>{
         ws.send(enc);
       } else if (msg.op === 'ping') {
         handled = true;
-        const resp = Buffer.from(JSON.stringify({ op:'pong', t: Date.now() }));
+        const resp = Buffer.from(JSON.stringify({ op:'pong', t: typeof msg.t === 'number' ? msg.t : Date.now(), serverTime: Date.now() }));
         const enc = dec ? encryptFrame(session, resp, FrameType.KEEPALIVE) : resp;
         ws.send(enc);
       } else if (msg.op === 'hosts') {
@@ -247,10 +286,10 @@ fastWss.on('connection', (ws: WebSocket, req: any, user: string)=>{
       if (msg.op === 'fetch' && msg.url) {
         handled = true;
         const out = await forwardHttpRequest({ url: msg.url, method: msg.method, headers: msg.headers });
-        const resp = fastEncode({ op:'fetch-res', id: msg.id, status: out.status, headers: out.headers, body: out.body.toString('base64').slice(0, 8000), mode:'fast' });
+        const resp = fastEncode({ op:'fetch-res', id: msg.id, status: out.status, headers: out.headers, body: out.body.toString('base64'), truncated: out.truncated, mode:'fast' });
         session.txBytes += resp.length; ws.send(resp);
       } else if (msg.op === 'ping') {
-        handled = true; const resp = fastEncode({ op:'pong', t: Date.now(), mode:'fast' }); ws.send(resp);
+        handled = true; const resp = fastEncode({ op:'pong', t: typeof msg.t === 'number' ? msg.t : Date.now(), serverTime: Date.now(), mode:'fast' }); ws.send(resp);
       } else if (msg.op === 'echo') {
         handled = true; const resp = fastEncode({ op:'echo-res', id: msg.id, echo: msg.data, mode:'fast' }); session.txBytes += resp.length; ws.send(resp);
       } else if (msg.op === 'hosts') {
@@ -282,8 +321,8 @@ server.listen(config.port, config.host, ()=>{
 ║  OpenPath-VPN Server  OPSP v1 (GhostPath)   ║
 ║  ${roleLabel.padEnd(42)}║
 ║  Listening on ${config.host}:${config.port}             ║
-║  OPS path: ${config.opsPath}  Decoy: ON              ║
-║  Transports: wss • h2-stream • doh • quic   ║
+║  Session endpoints: ${config.opsPath} and ${config.fastPath}             ║
+║  WebSocket only; TLS requires a proxy       ║
 ║  Role: ${config.role}  HostId: ${config.hostId.slice(0,22).padEnd(22)}║
 ╚══════════════════════════════════════════════╝
   Provision: POST /api/provision {user:"demo"}

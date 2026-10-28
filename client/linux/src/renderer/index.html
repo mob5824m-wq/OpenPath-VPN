@@ -1,5 +1,5 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
@@ -9,41 +9,147 @@
 .topbar{background:#0f172a;color:#e2e8f0;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;-webkit-app-region:drag}
 .badge{background:#38bdf8;color:#0f172a;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700}
 .card{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:14px;margin:10px}
-.btn{border:0;border-radius:999px;padding:10px 14px;font-weight:700;cursor:pointer}
-.btn-primary{background:#0f172a;color:#fff}
+.btn{border:0;border-radius:999px;padding:10px 14px;font-weight:700;cursor:pointer}.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn-primary{background:#0f172a;color:#fff}.fields{margin-top:10px;display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px}
+.fields label{font-size:12px;font-weight:600}.fields input{display:block;width:100%;margin-top:4px;padding:8px;border:1px solid #e2e8f0;border-radius:8px}
 .log{background:#0b1220;color:#cbd5e1;padding:10px;border-radius:8px;font-family:monospace;font-size:11px;height:180px;overflow:auto}
+@media(max-width:600px){.fields{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
-<div class="topbar"><div><b>OpenPath VPN</b> <span style="opacity:.7">Linux — TLS over TCP :443 • HTTPS mimic</span></div><span class="badge">GhostPath v1</span></div>
+<div class="topbar"><div><b>OpenPath</b> <span style="opacity:.7">Linux desktop</span></div><span class="badge">WebSocket + WireGuard</span></div>
 <div class="card">
-  <div id="status">Preparing Linux GUI…</div>
-  <div style="margin-top:10px;display:flex;gap:8px">
-    <button class="btn btn-primary" id="conn">Connect</button>
-    <button class="btn" id="disc">Disconnect</button>
+  <div id="status" role="status">Preparing Linux GUI…</div>
+  <p style="font-size:12px;color:#92400e">The WebSocket session does not route device traffic. The optional WireGuard device VPN below is separate.</p>
+  <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
+    <button class="btn btn-primary" id="conn" disabled>Connect</button>
+    <button class="btn" id="disc" disabled>Disconnect</button>
     <span id="stats" style="font-size:12px;color:#64748b"></span>
   </div>
-  <div style="margin-top:10px;display:grid;grid-template-columns:1fr 1fr;gap:8px">
-    <input id="server" placeholder="wss://cdn.openpath.example.com/ops" style="padding:8px;border:1px solid #e2e8f0;border-radius:8px"/>
-    <input id="psk" placeholder="psk" type="password" style="padding:8px;border:1px solid #e2e8f0;border-radius:8px"/>
+  <div class="fields">
+    <label>Server<input id="server" placeholder="wss://your-server/ops" spellcheck="false"/></label>
+    <label>Username<input id="user" placeholder="demo" autocomplete="username"/></label>
+    <label>Pre-shared key<input id="psk" placeholder="PSK" type="password" autocomplete="off"/></label>
   </div>
 </div>
-<div class="card"><div class="log" id="log"></div></div>
+<div class="card">
+  <b>Device-wide VPN · WireGuard</b>
+  <div id="device-status" role="status" style="margin-top:6px;font-size:12px">Checking device VPN…</div>
+  <p style="font-size:12px;color:#475569">Import a full-tunnel WireGuard profile from your server. This uses a separate UDP tunnel and requires administrator permission.</p>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <button class="btn" id="device-import" disabled>Import WireGuard profile</button>
+    <button class="btn" id="device-remove" disabled>Remove profile</button>
+  </div>
+  <label style="display:block;font-size:12px;margin-top:10px">NetShield / DNS on next connection
+    <select id="device-dns" disabled style="display:block;padding:8px;width:100%;margin-top:4px">
+      <option value="ads">Malware, ads and trackers · AdGuard DNS</option>
+      <option value="malware">Malware only · Quad9</option>
+      <option value="unfiltered">Unfiltered · profile DNS or Cloudflare</option>
+      <option value="custom">Custom DNS</option>
+    </select>
+  </label>
+  <label id="device-custom-wrap" hidden style="display:block;font-size:12px;margin-top:8px">Custom DNS IP addresses
+    <input id="device-custom" placeholder="1.1.1.1, 1.0.0.1" style="display:block;padding:8px;width:100%;margin-top:4px" />
+  </label>
+  <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+    <button class="btn btn-primary" id="device-connect" disabled>Connect device VPN</button>
+    <button class="btn" id="device-disconnect" disabled>Disconnect device VPN</button>
+  </div>
+  <p id="device-message" role="alert" style="font-size:12px;color:#92400e"></p>
+  <p style="font-size:11px;color:#64748b">An active interface does not confirm a successful peer handshake. No kill switch is provided; local routes or app-specific encrypted DNS may bypass these settings. The tunnel stays active until disconnected.</p>
+</div>
+<div class="card"><div class="log" id="log" aria-label="Connection log"></div></div>
 <script>
 const logEl=document.getElementById('log');
-function log(s){ const d=document.createElement('div'); d.textContent='['+new Date().toLocaleTimeString()+'] '+s; logEl.appendChild(d); logEl.scrollTop=logEl.scrollHeight; }
-log('TLS profile: Chrome124 JA3 • ALPN h2 • SNI front • decoy site on / — school DPI sees HTTPS');
+const statusEl=document.getElementById('status');
+const connectButton=document.getElementById('conn');
+const disconnectButton=document.getElementById('disc');
+const statsEl=document.getElementById('stats');
+const serverInput=document.getElementById('server');
+const userInput=document.getElementById('user');
+const pskInput=document.getElementById('psk');
+let currentState={connected:false,connecting:false};
+function log(s){const d=document.createElement('div');d.textContent='['+new Date().toLocaleTimeString()+'] '+s;logEl.appendChild(d);logEl.scrollTop=logEl.scrollHeight;}
+function showState(state){
+  currentState=state;
+  statusEl.textContent=state.connecting?'Connecting…':state.connected?'Session connected to '+state.server+' • '+(state.secure?'TLS':'unencrypted ws://'):'Disconnected';
+  connectButton.disabled=!!(state.connecting||state.connected);
+  disconnectButton.disabled=!(state.connecting||state.connected);
+  statsEl.textContent=state.connected?'RX '+state.rx+' B • TX '+state.tx+' B • RTT '+state.rtt+' ms':'';
+}
+async function connect(){
+  if(currentState.connected||currentState.connecting)return;
+  showState({connected:false,connecting:true});
+  try{showState(await window.openpathLinux.connect({serverUrl:serverInput.value.trim(),psk:pskInput.value,user:userInput.value.trim()}));}
+  catch(e){log('Error: '+e.message);try{showState(await window.openpathLinux.status());}catch{showState({connected:false,connecting:false});}}
+}
+async function disconnect(){
+  try{await window.openpathLinux.disconnect();}
+  catch(e){log('Error: '+e.message);}
+}
+const deviceStatus=document.getElementById('device-status');
+const deviceMessage=document.getElementById('device-message');
+const deviceImport=document.getElementById('device-import');
+const deviceRemove=document.getElementById('device-remove');
+const deviceConnect=document.getElementById('device-connect');
+const deviceDisconnect=document.getElementById('device-disconnect');
+const deviceDns=document.getElementById('device-dns');
+const deviceCustom=document.getElementById('device-custom');
+const deviceCustomWrap=document.getElementById('device-custom-wrap');
+let deviceState=null, deviceBusy=false;
+function showDevice(state){
+  deviceState=state;
+  deviceStatus.textContent=state.state==='active'?'WireGuard interface active':state.state==='inactive'?'Device VPN disconnected':state.state==='stopped'?'WireGuard service stopped':'Device VPN status unavailable';
+  const inactive=state.state==='inactive';
+  deviceImport.disabled=deviceBusy||!inactive;
+  deviceRemove.disabled=deviceBusy||!inactive||!state.configured;
+  deviceDns.disabled=deviceBusy||!inactive;
+  deviceCustom.disabled=deviceBusy||!inactive;
+  deviceConnect.disabled=deviceBusy||!inactive||!state.configured||!state.installed;
+  deviceDisconnect.disabled=deviceBusy||!state.owned||!['active','stopped'].includes(state.state);
+  const details=[];
+  if(state.message) details.push(state.message);
+  if(!state.installed) details.push('Install WireGuard and its system tools before connecting.');
+  deviceMessage.textContent=details.join(' ');
+}
+async function deviceAction(fn, label){
+  if(deviceBusy)return;
+  deviceBusy=true;if(deviceState)showDevice(deviceState);
+  try{
+    const result=await fn();showDevice(await window.openpathLinux.deviceVpn.status());
+    if(!result?.canceled){
+      log(label);
+      if(result?.endpoint && !result.hasIPv6Address) deviceMessage.textContent='The profile has no IPv6 interface address; IPv6 traffic may not work.';
+    }
+  }
+  catch(e){log('Device VPN error: '+e.message);deviceMessage.textContent=e.message;}
+  finally{deviceBusy=false;if(deviceState){const error=deviceMessage.textContent;showDevice(deviceState);if(error)deviceMessage.textContent=error;}}
+}
+if(window.openpathLinux?.deviceVpn){
+  const vpn=window.openpathLinux.deviceVpn;
+  deviceImport.onclick=()=>deviceAction(()=>vpn.importProfile(),'WireGuard profile imported');
+  deviceRemove.onclick=()=>deviceAction(()=>vpn.removeProfile(),'WireGuard profile removed');
+  deviceConnect.onclick=()=>deviceAction(()=>vpn.connect({dnsMode:deviceDns.value,customDns:deviceCustom.value}),'WireGuard interface started');
+  deviceDisconnect.onclick=()=>deviceAction(()=>vpn.disconnect(),'Device VPN disconnected');
+  deviceDns.onchange=()=>{deviceCustomWrap.hidden=deviceDns.value!=='custom';};
+  const refreshDevice=()=>{if(!deviceBusy)vpn.status().then(showDevice).catch(e=>{deviceStatus.textContent='Device VPN status unavailable';deviceMessage.textContent=e.message;});};
+  refreshDevice();setInterval(refreshDevice,5000);
+}else deviceStatus.textContent='Device VPN controls are unavailable in this view.';
+
 if(window.openpathLinux){
-  openpathLinux.getConfig().then(c=>{ document.getElementById('server').value=c.serverUrl; document.getElementById('psk').value=c.psk; log('Config loaded from ~/.config/openpath/config.json'); });
-  document.getElementById('conn').onclick=async()=>{ const serverUrl=document.getElementById('server').value, psk=document.getElementById('psk').value;
-    log('Starting TUN (kernel if sudo, else SOCKS fallback 127.0.0.1:1080)...');
-    try{ const r=await openpathLinux.connect({serverUrl, psk, user:'demo'}); log('Tunnel up mode='+r.mode+' '+r.wsUrl.slice(0,60)+'...'); document.getElementById('status').textContent='Connected • '+r.mode; }catch(e){log('Error '+e.message)}
-  };
-  document.getElementById('disc').onclick=async()=>{ await openpathLinux.disconnect(); log('Disconnected — iptables cleaned'); document.getElementById('status').textContent='Disconnected'; };
-  openpathLinux.logs(s=> log(s));
-} else {
-  document.getElementById('status').textContent='Running in web preview fallback — use Electron binary locally for full Linux TUN';
-  log('Preview mode — native TUN requires Linux binary (openpath-linux/AppImage). See README for install.');
+  window.openpathLinux.logs(log);
+  window.openpathLinux.onState(showState);
+  window.openpathLinux.onTrayConnect(connect);
+  window.openpathLinux.onTrayDisconnect(disconnect);
+  window.openpathLinux.onTraySettings(()=>serverInput.focus());
+  connectButton.onclick=connect;
+  disconnectButton.onclick=disconnect;
+  window.openpathLinux.getConfig().then(c=>{serverInput.value=c.serverUrl||'';userInput.value=c.user||'demo';pskInput.value=c.psk||'';log('Configuration loaded.');})
+    .catch(e=>log('Could not load configuration: '+e.message));
+  window.openpathLinux.status().then(showState).catch(e=>log('Could not read status: '+e.message));
+}else{
+  statusEl.textContent='Native controls are unavailable in this browser preview.';
+  log('Open the Linux Electron app to use its session controls.');
 }
 </script>
 </body>
