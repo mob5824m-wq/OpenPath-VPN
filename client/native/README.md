@@ -4,7 +4,7 @@ This is the release desktop client for Linux, Windows and macOS. Its UI uses PyS
 
 ## Run and test
 
-Python 3.10+ and a graphical desktop are required. Create a virtual environment and install `requirements.txt`, then:
+Python 3.10–3.13 and a graphical desktop are required. Create a virtual environment and install `requirements.txt`, then:
 
 ```bash
 python client/native/entry.py

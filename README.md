@@ -11,7 +11,7 @@ There are two distinct connections:
 
 ## Native desktop app
 
-Download a desktop installer from a release that includes one, or run from source with Python 3.10+. On Linux or macOS:
+Download a desktop installer from a release that includes one, or run from source with Python 3.10–3.13. On Linux or macOS:
 
 ```bash
 python3 -m venv .venv
