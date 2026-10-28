@@ -35,6 +35,13 @@ jobs:
           npm test --prefix client/web
           npm run typecheck --prefix client/web
           npm run build --prefix client/web
+      - name: Test desktop and mobile layouts in Chromium
+        working-directory: client/web
+        shell: bash
+        run: |
+          set -euo pipefail
+          export CHROME_BIN="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
+          npm run test:responsive
       - name: Test legacy Linux renderer (not a release artifact)
         run: |
           set -euo pipefail

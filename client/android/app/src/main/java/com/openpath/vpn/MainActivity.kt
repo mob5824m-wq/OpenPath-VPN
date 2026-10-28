@@ -33,7 +33,7 @@ class MainActivity : Activity() {
     private var customDns = ""
     private val modes = arrayOf("profile", "malware", "ads", "custom")
     private val modeLabels = arrayOf("Profile DNS (Cloudflare fallback)", "Quad9 — malware filtering", "AdGuard DNS — ads, trackers and malware", "Custom DNS IPs")
-    private val background = Color.rgb(9, 9, 15)
+    private val backgroundColor = Color.rgb(9, 9, 15)
     private val panel = Color.rgb(21, 20, 30)
     private val border = Color.rgb(48, 46, 61)
     private val muted = Color.rgb(181, 179, 196)
@@ -117,7 +117,7 @@ class MainActivity : Activity() {
 
     private fun render() {
         val wide = resources.configuration.screenWidthDp >= 720
-        val root = vertical().apply { setBackgroundColor(background) }
+        val root = vertical().apply { setBackgroundColor(backgroundColor) }
         // Android 15 enforces edge-to-edge for target 35. Keep controls clear of system bars.
         @Suppress("DEPRECATION")
         root.setOnApplyWindowInsetsListener { view, insets ->

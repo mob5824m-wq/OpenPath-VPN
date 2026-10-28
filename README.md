@@ -80,6 +80,8 @@ For a downloaded server archive, run `npm ci --omit=dev` then `npm start`. Set `
 PYTHONPATH=client/native python -m unittest discover -s client/native/tests -v
 (cd server && npm ci && npm test && npm run build)
 (cd client/web && npm ci && npm test && npm run typecheck && npm run build)
+# For real-browser layout tests, point CHROME_BIN to an installed Chrome/Chromium:
+(cd client/web && CHROME_BIN=/usr/bin/google-chrome npm run test:responsive)
 (cd client/android && ./gradlew testDebugUnitTest assembleRelease)
 ```
 

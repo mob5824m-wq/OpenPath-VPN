@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0 --port 4173",
     "test": "node ../../scripts/run-tests.cjs --tsx",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:responsive": "node tests/responsive.browser.mjs"
   },
   "dependencies": {
     "react": "^18.2.0",
@@ -21,6 +22,7 @@
     "@types/react-dom": "^18.2.0",
     "@vitejs/plugin-react": "^4.2.0",
     "jsdom": "^25.0.1",
+    "playwright-core": "1.56.1",
     "tsx": "^4.23.15",
     "typescript": "^5.4.0",
     "vite": "^5.1.0"
