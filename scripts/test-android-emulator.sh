@@ -7,7 +7,7 @@ RELAY=''
 TAP=''
 UNTRUSTED_RELAY=''
 cleanup() {
-  if [ -n "$LISTENER" ]; then kill "$LISTENER" 2>/dev/null || true; fi
+  if [ -n "$LISTENER" ]; then kill "$LISTENER" 2>/dev/null || true; wait "$LISTENER" 2>/dev/null || true; fi
   if [ -n "$TAP" ]; then kill "$TAP" 2>/dev/null || true; wait "$TAP" 2>/dev/null || true; fi
   if [ -n "$UNTRUSTED_RELAY" ]; then kill "$UNTRUSTED_RELAY" 2>/dev/null || true; wait "$UNTRUSTED_RELAY" 2>/dev/null || true; fi
   if [ -n "$RELAY" ]; then kill "$RELAY" 2>/dev/null || true; wait "$RELAY" 2>/dev/null || true; fi
@@ -64,21 +64,16 @@ if ! read -r -t 30 line <&5 || [ "$line" != 'TEST RELAY READY' ]; then
   echo '::error::Untrusted TLS test relay failed to start'
   exit 1
 fi
-python3 -u - <<'PY' > "$TMP/server.log" 2>&1 &
-import socket
-with socket.socket() as server:
-    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server.bind(('10.203.0.1', 19430))
-    server.listen(2)
-    server.settimeout(120)
-    for _ in range(2):
-        conn, _ = server.accept()
-        with conn:
-            if conn.recv(8) != b'openpath':
-                raise RuntimeError('Unexpected test message')
-            conn.sendall(b'ok')
-PY
+mkfifo "$TMP/peer-ready"
+exec 6<>"$TMP/peer-ready"
+python3 -u scripts/test-android-peer.py 10.203.0.1 19430 >&6 2>"$TMP/server.log" &
 LISTENER=$!
+if ! read -r -t 30 line <&6 || [ "$line" != 'ANDROID TEST PEER READY 19430' ]; then
+  cat "$TMP/server.log"
+  echo '::error::Android TCP test peer failed to start'
+  exit 1
+fi
+exec 6>&-
 adb install -r client/android/app/build/outputs/apk/debug/app-debug.apk
 adb install -r client/android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 adb shell appops set com.openpath.vpn ACTIVATE_VPN allow
@@ -89,7 +84,13 @@ adb shell am instrument -w -r -e class com.openpath.vpn.VpnIntegrationTest -e pr
 status=${PIPESTATUS[0]}
 set -e
 if [ "$status" -ne 0 ] || ! grep -Eq '^OK \(1 test\)' "$TMP/test.log"; then
-  echo "::error::Android emulator WireGuard test failed: $(tail -n 12 "$TMP/test.log" | tr '\n\r' '  ')"
+  reason=$(grep -E '(^[0-9]+\) |Exception|Caused by:)' "$TMP/test.log" | head -n 8 | tr '\n\r' '  ' || true)
+  echo "::error::Android emulator WireGuard test failed: $reason $(tail -n 12 "$TMP/test.log" | tr '\n\r' '  ')"
+  if [ -s "$TMP/server.log" ]; then
+    echo "::error::Android TCP test peer: $(tail -n 12 "$TMP/server.log" | tr '\n\r' '  ')"
+  fi
+  # These values are ephemeral public peer identifiers and counters, never private keys.
+  echo "::notice::Test peer handshake and transfer: $(sudo wg show optest0 latest-handshakes | tr '\n\r' '  ') $(sudo wg show optest0 transfer | tr '\n\r' '  ')"
   cat "$TMP/server.log" "$TMP/relay.err" "$TMP/tap.err" "$TMP/untrusted.err"
   exit 1
 fi

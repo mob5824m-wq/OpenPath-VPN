@@ -36,6 +36,8 @@ jobs:
           cache-dependency-path: server/package-lock.json
       - name: Install relay test dependencies
         run: npm ci --prefix server
+      - name: Test the Android TCP peer fixture
+        run: python3 -m unittest discover -s scripts/tests -p 'test_android_peer.py' -v
       - name: Build app and instrumentation APKs
         shell: bash
         working-directory: client/android
