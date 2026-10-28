@@ -303,7 +303,7 @@ jobs:
           PYTHONPATH=client/native python scripts/test-stealth-macos.py 2>&1 | tee "$RUNNER_TEMP/stealth-macos.log"
           status=${PIPESTATUS[0]}
           if [ "$status" -ne 0 ]; then
-            echo "::error::macOS Stealth handshake failed: $(tail -n 25 "$RUNNER_TEMP/stealth-macos.log" | tr '\n\r' '  ')"
+            echo "::error::macOS Stealth handshake failed: $(tail -n 50 "$RUNNER_TEMP/stealth-macos.log" | tr '\n\r' '  ')"
             exit "$status"
           fi
       - id: version
