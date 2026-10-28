@@ -18,7 +18,6 @@ import { StealthRelayServer, STEALTH_PATH, parseRelayPsks } from './stealth/rela
 const packageVersion = (JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {version:string}).version;
 const app = express();
 app.use(cors());
-app.use(express.json());
 const relayOnly = process.env.STEALTH_RELAY_ONLY === '1';
 // For a public relay, expose only the relay and a minimal health check. The
 // legacy provision/registration/session endpoints are not production-safe.
@@ -26,6 +25,7 @@ app.use((req, res, next) => {
   if (relayOnly && req.path !== '/health') { res.sendStatus(404); return; }
   next();
 });
+app.use(express.json());
 
 // --- Health & API (with host role) ---
 app.get('/health', (_req,res)=> res.json({

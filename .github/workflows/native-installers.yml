@@ -107,6 +107,7 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
+          set +e
           PYTHONPATH=client/native python scripts/test-stealth-macos.py 2>&1 | tee "$RUNNER_TEMP/stealth-macos.log"
           status=${PIPESTATUS[0]}
           if [ "$status" -ne 0 ]; then
