@@ -1,9 +1,8 @@
 import { Country } from "../notifications/types";
 
 /**
- * Proton-like Profiles — quick-connect presets + custom profiles.
- * Each profile saves: name, color, icon, country/server, features (Secure Core, NetShield, Kill Switch, etc.), protocol.
- * Presets mirror Proton VPN so user feels at home.
+ * Profiles — quick-connect presets + custom profiles.
+ * Each profile saves: name, color, icon, country/server, features (Secure Core, NetShield, Kill Switch, etc.) and protocol.
  */
 
 export type ProfileId = string;
@@ -30,7 +29,7 @@ export interface Profile {
   serverId?: string; // specific server, null = auto fastest in country
   protocol: "auto" | "stealth" | "stealth-fortinet" | "doh";
   stealthProfile: string; // chrome124 / fortinet etc.
-  // Feature flags (like Proton)
+  // Feature flags
   secureCore: boolean; // double-hop via privacy jurisdiction
   secureCoreEntry?: Country; // e.g., Iceland → Canada
   netShield: NetShieldLevel;
@@ -45,12 +44,12 @@ export interface Profile {
   createdAt: number;
   lastUsed?: number;
   isPinned?: boolean;
-  // Tags like Proton: p2p, streaming, tor
+  // Tags: p2p, streaming, tor
   tags: string[]; // ["p2p","streaming:netflix-us","tor"]
   quickConnect?: boolean; // show on Quick Connect card
 }
 
-// Default Proton-mirrored presets for OpenPath
+// Default OpenPath presets for OpenPath
 export const defaultProfiles: Profile[] = [
   {
     id: "fastest",
@@ -168,7 +167,7 @@ export const defaultProfiles: Profile[] = [
     netShield: 1,
     killSwitch: "advanced",
     splitTunnel: { mode: "off" },
-    portForwarding: true, // Proton supports port forward on P2P
+    portForwarding: true, // OpenPath supports port forward on P2P
     vpnAccelerator: true,
     moderateNAT: false,
     isSystem: true,

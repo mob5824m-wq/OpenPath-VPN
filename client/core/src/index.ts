@@ -24,7 +24,8 @@ export class OpenPathClient {
   private wsUrl = '';
   private psk = '';
   private path = '/ops';
-  private rx=0, tx=0;
+  private rx=0;
+  private tx=0;
   private connected=false;
   private pingTimer:any=null;
   private reconnectAttempts=0;

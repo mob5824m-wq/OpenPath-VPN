@@ -1,7 +1,7 @@
 import { spawn } from 'child_process';
 
 /**
- * Linux persistent notification — mimics Proton's always-present VPN banner.
+ * Linux system notification on connect/disconnect.
  * Uses:
  *  - notify-send with --hint=int:transient:0 + --urgency=critical (persists in GNOME notification center)
  *  - fallback: libnotify via node-notifier
@@ -10,7 +10,6 @@ import { spawn } from 'child_process';
  *
  * Called from Electron main.ts on connect:
  *   notifier.showConnected("Canada", "CA", rx, rxSpeed, tx, txSpeed)
- *   notifier.update(rx, tx, speeds) every 1s
  *   notifier.hide() on disconnect
  */
 export class LinuxNotification {

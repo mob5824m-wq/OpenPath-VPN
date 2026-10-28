@@ -26,7 +26,7 @@ export interface NotificationPayload {
   profileName?: string;
   country: Country;
   stats: TransferStats;
-  // Proton-like extra
+  // optional extras
   secureCoreExit?: Country;
   ip?: string; // visible exit IP
   protocol?: string; // stealth, wireguard-like, etc.

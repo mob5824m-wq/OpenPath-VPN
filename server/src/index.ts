@@ -74,6 +74,15 @@ app.post('/api/upload', (req,res)=>{
   });
 });
 
+app.get('/api/ip', (req,res)=>{
+  const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || (req.socket.remoteAddress||'').replace('::ffff:','') || 'unknown';
+  res.json({ ip, country: 'CA', city: 'Unknown', via: 'openpath' });
+});
+app.get('/api/client-ip', (req,res)=>{
+  const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || (req.socket.remoteAddress||'').replace('::ffff:','') || 'unknown';
+  res.json({ ip });
+});
+
 // --- Decoy website (must be last GET) ---
 app.get('/', (_req,res)=>{
   res.setHeader('Content-Type','text/html; charset=utf-8');

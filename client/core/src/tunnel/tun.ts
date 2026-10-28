@@ -13,7 +13,9 @@ export interface TunnelProvider {
 
 export class NoopTunnel implements TunnelProvider {
   private handler: ((pkt:Uint8Array)=>void)|null=null;
-  private rx=0, tx=0, pkts=0;
+  private rx=0;
+  private tx=0;
+  private pkts=0;
   async start(){}
   async stop(){}
   onPacket(p: Uint8Array){ this.rx+=p.length; this.pkts++; }
@@ -30,7 +32,9 @@ export class NoopTunnel implements TunnelProvider {
 // Browser cannot open raw sockets; we proxy fetch via ServiceWorker + tunnel
 export class SocksProxyTunnel implements TunnelProvider {
   private handler: ((p:Uint8Array)=>void)|null=null;
-  private rx=0, tx=0, pkts=0;
+  private rx=0;
+  private tx=0;
+  private pkts=0;
   constructor(private port=1080){}
   async start(){ console.log(`[SOCKS] Listening on 127.0.0.1:${this.port} (simulated); configure browser proxy to this`); }
   async stop(){}

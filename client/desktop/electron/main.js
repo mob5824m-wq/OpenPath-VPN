@@ -24,4 +24,9 @@ ipcMain.handle('tun:start', async (_e, cfg)=>{
   return { ok:true, iface:'utun9', ip:'10.89.0.2' };
 });
 ipcMain.handle('tun:stop', async ()=> ({ ok:true }));
+
+// Window controls used by the in-app title bar
+ipcMain.on('window:minimize', () => win?.minimize());
+ipcMain.on('window:maximize', () => { if(!win) return; win.isMaximized() ? win.unmaximize() : win.maximize(); });
+ipcMain.on('window:close', () => win?.close());
 ipcMain.handle('tun:stats', async ()=> ({ rx: 0, tx: 0, rtt: 24 }));

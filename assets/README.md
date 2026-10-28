@@ -10,7 +10,7 @@ Palette:
 - Electric Cyan `#0ea5e9`
 - Violet `#6366f1` (gradient right rim)
 - Light `#f8fafc` (background)
-- Green `#0bb07b` for connected status (like Proton)
+- Green `#0bb07b` for connected status
 - Amber `#f59e0b` for connecting
 
 Font: Inter (UI), JetBrains Mono (stats)

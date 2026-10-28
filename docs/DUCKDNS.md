@@ -11,7 +11,7 @@ Host your stealth VPN on `https://YOURNAME.duckdns.org` with automatic TLS (Let'
 | Stable URL for school clients | `yourname.duckdns.org` — never changes, even if your IP does |
 | Free TLS | Let's Encrypt auto-issue for `*.duckdns.org` via Caddy (HTTP or DNS challenge) |
 | No static IP | `duckdns-update.sh` refreshes IP every 5 min |
-| Bypass school IP blocklists | Your personal IP never on VPN blocklists (vs Nord/Proton) |
+| Bypass school IP blocklists | Your personal IP never sits on shared VPN blocklists |
 | Fortinet-friendly | Still looks like normal HTTPS — `Business / DuckDNS` + `TLS 1.3` |
 
 > **FortiGate sees:** `TLS ClientHello SNI=yourname.duckdns.org` on `443/TCP` — category often `Personal Sites / Dynamic DNS`, not `Proxy Avoidance`. Pair with Caddy → real cert, not self-signed. If your school blocks Dynamic DNS category, see [Fortinet doc](./FORTINET.md) → use `cdn.yourdomain.com` on Cloudflare instead.
