@@ -9,7 +9,7 @@ from PySide6.QtCore import QObject, QRunnable, QSettings, QStandardPaths, QThrea
 from PySide6.QtGui import QDesktopServices, QIcon
 from PySide6.QtWidgets import (
     QApplication, QBoxLayout, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
-    QListWidget, QListWidgetItem, QMainWindow, QPlainTextEdit, QPushButton, QScrollArea, QStackedWidget,
+    QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QPlainTextEdit, QPushButton, QScrollArea, QStackedWidget,
     QVBoxLayout, QWidget,
 )
 
@@ -225,6 +225,13 @@ class MainWindow(QMainWindow):
         self.import_button = button("Import WireGuard profile")
         self.import_button.clicked.connect(self.import_profile)
         box.addWidget(self.import_button)
+        box.addWidget(label("Device VPN transport"))
+        self.vpn_transport = QComboBox()
+        self.vpn_transport.setAccessibleName("Device VPN transport")
+        self.vpn_transport.addItem("Direct WireGuard (UDP)", "direct")
+        self.vpn_transport.addItem("Stealth WireGuard over TLS relay", "stealth")
+        box.addWidget(self.vpn_transport)
+        box.addWidget(label("Stealth uses the server and PSK in Settings. It requires a configured WSS relay and keeps OpenPath running. No direct fallback; network changes may require reconnecting.", "subtitle"))
         box.addWidget(label("NetShield / DNS on next connection"))
         self.dns_mode = QComboBox()
         self.dns_mode.setAccessibleName("NetShield / DNS on next connection")
@@ -254,11 +261,11 @@ class MainWindow(QMainWindow):
         self.device_message = label("", "message")
         self.device_message.setAccessibleName("Device VPN message")
         box.addWidget(self.device_message)
-        box.addWidget(label("The VPN stays active after the app closes. No general kill switch is provided; local routes or app-specific encrypted DNS may bypass filtering.", "subtitle"))
+        box.addWidget(label("Direct VPN stays active after the app closes. Stealth requires OpenPath to remain open. No general kill switch is provided; local routes or app-specific encrypted DNS may bypass filtering.", "subtitle"))
         layout.addWidget(frame)
         info, information = card()
         information.addWidget(label("Separate connection types", "sectionTitle"))
-        information.addWidget(label("The device VPN uses a WireGuard UDP tunnel and requires an independently configured WireGuard server. The optional WebSocket session is separate and does not route device traffic.", "subtitle"))
+        information.addWidget(label("Direct VPN uses WireGuard UDP. Stealth VPN carries WireGuard over an authenticated TLS relay. Both require a configured WireGuard server. The separate WebSocket session does not route device traffic.", "subtitle"))
         layout.addWidget(info)
         layout.addStretch()
         self._add_page(content)
@@ -381,7 +388,7 @@ class MainWindow(QMainWindow):
         content, layout = page()
         layout.addWidget(label("Settings & safety", "sectionTitle"))
         server_frame, server_box = card()
-        server_box.addWidget(label("WebSocket server", "sectionTitle"))
+        server_box.addWidget(label("WebSocket server & Stealth relay", "sectionTitle"))
         self.server_input = QLineEdit(str(self.settings.value("serverUrl", "")))
         self.server_input.setAccessibleName("WebSocket server address")
         self.server_input.setPlaceholderText("wss://server.example.com/ops")
@@ -398,14 +405,14 @@ class MainWindow(QMainWindow):
         save = button("Save server settings")
         save.clicked.connect(self.save_server_settings)
         server_box.addWidget(save)
-        self.settings_message = label("The PSK is never saved by this app.", "subtitle")
+        self.settings_message = label("Stealth VPN uses this server and PSK at /stealth-wg; wss:// is required. The PSK is never saved by this app.", "subtitle")
         server_box.addWidget(self.settings_message)
         layout.addWidget(server_frame)
         frame, box = card()
         box.addWidget(label("Native WireGuard integration", "sectionTitle"))
         box.addWidget(label("Install WireGuard's system tools and use an unlocked system keychain. Starting and stopping the tunnel requires administrator authorization.", "subtitle"))
         box.addWidget(label("DNS policies use third-party resolvers: AdGuard DNS, Quad9, profile DNS/Cloudflare, or custom IPs. Applications using their own encrypted DNS may bypass filtering.", "subtitle"))
-        box.addWidget(label("No general kill switch, peer verification, or LAN leak protection is provided. Check system routes and connectivity independently.", "subtitle"))
+        box.addWidget(label("No general kill switch, peer verification, or LAN leak protection is provided. On Windows, Stealth disables WireGuard's block-untunneled firewall to allow the relay. Check system routes and connectivity independently.", "subtitle"))
         self.settings_status = label("Checking device VPN…", "subtitle")
         box.addWidget(self.settings_status)
         self.refresh_button = button("Refresh device status")
@@ -546,6 +553,14 @@ class MainWindow(QMainWindow):
         self._submit(lambda: self.session.fetch(address), done)
 
     def closeEvent(self, event):
+        if self.device_busy:
+            self._set_device_message("Wait for the device VPN operation to finish before closing OpenPath.")
+            event.ignore()
+            return
+        if getattr(self.vpn, "relay_running", lambda: False)():
+            QMessageBox.warning(self, "Stealth VPN is active", "Disconnect the Stealth device VPN before closing OpenPath. Its TLS relay runs in this app.")
+            event.ignore()
+            return
         self.session.disconnect()
         super().closeEvent(event)
 
@@ -558,6 +573,7 @@ class MainWindow(QMainWindow):
         self.profile_remove.setEnabled(not self.device_busy and inactive and bool(status.get("configured")))
         self.connect_button.setEnabled(not self.device_busy and inactive and bool(status.get("configured")) and bool(status.get("installed")))
         self.disconnect_button.setEnabled(not self.device_busy and active_or_stopped and bool(status.get("owned")))
+        self.vpn_transport.setEnabled(not self.device_busy and inactive)
         self.dns_mode.setEnabled(not self.device_busy and inactive)
         self.custom_dns.setEnabled(not self.device_busy and inactive)
         self.refresh_button.setEnabled(not self.device_busy and not self.status_busy)
@@ -641,6 +657,16 @@ class MainWindow(QMainWindow):
 
     def connect_vpn(self):
         options = {"dnsMode": str(self.dns_mode.currentData()), "customDns": self.custom_dns.text()}
+        if self.vpn_transport.currentData() == "stealth":
+            if sys.platform == "win32":
+                choice = QMessageBox.warning(self, "Windows Stealth safety warning",
+                    "Stealth uses split default routes so its TLS relay can connect. This disables WireGuard for Windows' block-untunneled firewall, including its DNS restriction. Traffic may leak. Continue?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+                if choice != QMessageBox.StandardButton.Yes:
+                    return
+                options["allowWindowsStealthWithoutKillSwitch"] = "yes"
+            options.update({"transport": "stealth", "relayServer": self.server_input.text().strip(),
+                            "relayUsername": self.user_input.text().strip(), "relayPsk": self.psk_input.text()})
         self._device_action(lambda: self.vpn.connect(options), "WireGuard interface started; verify peer connectivity.")
 
     def disconnect_vpn(self):

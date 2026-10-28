@@ -16,7 +16,7 @@ function cleanupBad() {
 }
 setInterval(cleanupBad, 30000).unref?.();
 
-export function validateAuth(url: URL, ip: string): AuthResult {
+export function validateAuth(url: URL, ip: string, exactPath = false): AuthResult {
   const now = Date.now();
 
   // tarpit check
@@ -41,7 +41,7 @@ export function validateAuth(url: URL, ip: string): AuthResult {
   if (nonce.length < 8) return recordBad(ip, 'bad-nonce');
 
   // Expected HMAC: HMAC-SHA256(psk, `${ts}.${nonce}.${path}`) — accept either opsPath or fastPath (+ plain /ops fallback)
-  const pathsToTry = [config.opsPath, config.fastPath, '/ops'];
+  const pathsToTry = exactPath ? [url.pathname] : [config.opsPath, config.fastPath, '/ops'];
   let ok = false;
   for (const p of pathsToTry) {
     const expected = createHmac('sha256', psk).update(`${ts}.${nonce}.${p}`).digest('hex');

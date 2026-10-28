@@ -44,6 +44,40 @@ class ProfileValidatorTest {
         assertThrows(IllegalArgumentException::class.java) { ProfileValidator.withDns(config, "custom", "fe80::1%wlan0") }
     }
 
+    @Test fun stealthPreservesPeerAndInterfaceWithoutAppExclusions() {
+        val original = parse()
+        val relay = ProfileValidator.withStealthEndpoint(original, 45678)
+        assertEquals(original.`interface`, relay.`interface`)
+        assertTrue(relay.`interface`.excludedApplications.isEmpty())
+        assertEquals(original.peers[0].allowedIps, relay.peers[0].allowedIps)
+        assertEquals(original.peers[0].publicKey, relay.peers[0].publicKey)
+        assertEquals("127.0.0.1:45678", relay.peers[0].endpoint.get().toString())
+        assertThrows(IllegalArgumentException::class.java) { ProfileValidator.withStealthEndpoint(original, 0) }
+    }
+
+    @Test fun stealthRequiresTlsAndSignsTheExactRelayPath() {
+        val url = java.net.URI(StealthProtocol.signedUrl("wss://relay.example/ops", "test-user", "test-secret"))
+        assertEquals("https", url.scheme)
+        assertEquals("/stealth-wg", url.path)
+        val query = url.rawQuery.split('&').associate { part ->
+            val pair = part.split('=', limit = 2)
+            java.net.URLDecoder.decode(pair[0], "UTF-8") to java.net.URLDecoder.decode(pair[1], "UTF-8")
+        }
+        assertEquals("test-user", query["user"])
+        val parts = query.getValue("auth").split('.')
+        assertEquals(3, parts.size)
+        val mac = javax.crypto.Mac.getInstance("HmacSHA256")
+        mac.init(javax.crypto.spec.SecretKeySpec("test-secret".toByteArray(), "HmacSHA256"))
+        val expected = mac.doFinal("${parts[0]}.${parts[1]}.${url.path}".toByteArray())
+            .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+        assertEquals(expected, parts[2])
+        assertThrows(IllegalArgumentException::class.java) { StealthProtocol.signedUrl("ws://relay.example", "u", "p") }
+        assertThrows(IllegalArgumentException::class.java) { StealthProtocol.signedUrl("wss://relay.example/?auth=x", "u", "p") }
+        val packet = ByteArray(148).also { it[0] = 1 }
+        assertTrue(StealthProtocol.valid(packet))
+        assertFalse(StealthProtocol.valid(ByteArray(4096)))
+    }
+
     @Test fun fallbackDnsAndInvalidProfiles() {
         val noDns = parse(profile.replace("DNS = 10.7.0.1", ""))
         assertEquals(setOf("1.1.1.1", "1.0.0.1"), ProfileValidator.withDns(noDns, "profile", "").`interface`.dnsServers.map { it.hostAddress }.toSet())

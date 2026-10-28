@@ -1,15 +1,14 @@
 """Validated, administrator-authorized WireGuard integration for native clients.
 
-The WebSocket demo is deliberately not used here. A WireGuard profile belongs
-in the OS credential store, and only sanitized configuration reaches wg-quick
-or the official Windows tunnel service.
+WireGuard profiles belong in the OS credential store. Direct mode uses their
+configured UDP endpoint; opt-in Stealth uses a separately authenticated relay.
 """
 from __future__ import annotations
 
 import base64
 import binascii
 import contextlib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import ipaddress
 import json
 import ntpath
@@ -177,7 +176,7 @@ def dns_for(profile: Profile, options: dict[str, str] | None = None) -> tuple[st
     )
 
 
-def render_config(profile: Profile, options: dict[str, str] | None = None) -> str:
+def render_config(profile: Profile, options: dict[str, str] | None = None, *, split_default_routes: bool = False) -> str:
     dns = dns_for(profile, options)
     lines = ["[Interface]", f"PrivateKey = {profile.private_key}", f"Address = {', '.join(profile.addresses)}", f"DNS = {', '.join(dns)}"]
     if profile.mtu is not None:
@@ -187,7 +186,8 @@ def render_config(profile: Profile, options: dict[str, str] | None = None) -> st
     lines.extend(("", "[Peer]", f"PublicKey = {profile.public_key}"))
     if profile.preshared_key:
         lines.append(f"PresharedKey = {profile.preshared_key}")
-    lines.extend((f"Endpoint = {profile.endpoint}", "AllowedIPs = 0.0.0.0/0, ::/0", f"PersistentKeepalive = {profile.keepalive}", ""))
+    routes = "0.0.0.0/1, 128.0.0.0/1, ::/1, 8000::/1" if split_default_routes else "0.0.0.0/0, ::/0"
+    lines.extend((f"Endpoint = {profile.endpoint}", f"AllowedIPs = {routes}", f"PersistentKeepalive = {profile.keepalive}", ""))
     return "\n".join(lines)
 
 
@@ -284,7 +284,7 @@ def _remove(path: Path) -> None:
 class DeviceVPN:
     def __init__(self, storage_path: str | Path, *, platform: str = sys.platform, keychain: Any = None,
                  run: Callable[..., str] = run_command, find: Callable[[list[str]], str | None] = find_tool,
-                 wireguard_dir: str | Path = "/var/run/wireguard"):
+                 wireguard_dir: str | Path = "/var/run/wireguard", relay_factory=None):
         self.platform = platform
         self.keychain = keychain or NativeKeychain(platform)
         self.run = run
@@ -295,6 +295,17 @@ class DeviceVPN:
         self.marker = self.directory / "active.json"
         self.windows_config = self.directory / f"{NAME}.conf"
         self._operation = threading.Lock()
+        self._relay_factory = relay_factory
+        self._relay = None
+
+    def _stop_relay(self):
+        relay, self._relay = self._relay, None
+        if relay is not None:
+            relay.stop()
+
+    def relay_running(self) -> bool:
+        # Even a failed bridge requires an orderly VPN disconnect before exit.
+        return self._relay is not None
 
     @contextlib.contextmanager
     def locked(self):
@@ -408,7 +419,12 @@ class DeviceVPN:
 
     def status(self) -> dict[str, Any]:
         runtime = self.runtime_status()
+        # If the interface was removed externally, stop an orphaned bridge. Do
+        # not interfere with the interval between starting it and wg-quick up.
+        if runtime["state"] == "inactive" and self._relay is not None and not self._operation.locked():
+            self._stop_relay()
         configured, owned = self.metadata.is_file(), False
+        record = {}
         if runtime.get("identity"):
             try:
                 record = json.loads(self.marker.read_text(encoding="utf-8"))
@@ -436,8 +452,16 @@ class DeviceVPN:
                 endpoint = str(json.loads(self.metadata.read_text(encoding="utf-8")).get("endpoint", ""))[:253]
             except (OSError, ValueError, AttributeError):
                 pass
+        transport = record.get("transport", "direct") if owned and isinstance(record, dict) else "direct"
+        relay_state = "not-used"
+        if transport == "stealth":
+            relay_state = self._relay.status() if self._relay is not None else "not-running"
+            if relay_state == "connected":
+                message = "TLS relay connected; WireGuard peer connectivity is not yet verified. Keep OpenPath open."
+            else:
+                message = "Stealth relay is not connected. Device traffic cannot use it; disconnect and reconnect. No direct fallback."
         return {**runtime, "configured": configured, "owned": owned, "installed": installed, "interface": NAME,
-                "message": message, "endpoint": endpoint}
+                "message": message, "endpoint": endpoint, "transport": transport, "relayState": relay_state}
 
     def import_file(self, filename: str | Path) -> dict[str, Any]:
         with self.locked():
@@ -506,11 +530,24 @@ class DeviceVPN:
             profile, _ = self._profile()
             options = options or {}
             safe_options = {"dnsMode": str(options.get("dnsMode", "unfiltered")), "customDns": str(options.get("customDns", ""))}
-            config = render_config(profile, safe_options)
+            transport = options.get("transport", "direct")
+            if transport not in ("direct", "stealth"):
+                raise ValueError("Select Direct or Stealth device VPN")
+            if transport == "stealth" and self.platform == "win32" and options.get("allowWindowsStealthWithoutKillSwitch") != "yes":
+                raise ValueError("Windows Stealth requires acknowledging that WireGuard's block-untunneled firewall is disabled")
+            # Validate DNS before opening the relay or changing anything.
+            dns_for(profile, safe_options)
             self.init_dir()
             _remove(self.marker)
             started = False
             try:
+                if transport == "stealth":
+                    from .stealth import StealthBridge
+                    relay = self._relay_factory() if self._relay_factory else StealthBridge(platform=self.platform)
+                    port = relay.start(str(options.get("relayServer", "")), str(options.get("relayUsername", "")), str(options.get("relayPsk", "")))
+                    self._relay = relay
+                    profile = replace(profile, endpoint=f"127.0.0.1:{port}")
+                config = render_config(profile, safe_options, split_default_routes=(transport == "stealth" and self.platform == "win32"))
                 if self.platform == "win32":
                     self._write(self.windows_config, config)
                     self.elevated("up", str(self.windows_config))
@@ -524,7 +561,7 @@ class DeviceVPN:
                 # DNS is not secret. The interface identity helps avoid treating
                 # a later, unrelated interface as the one we started.
                 self._write(self.marker, json.dumps({"interface": NAME, "identity": runtime["identity"],
-                                                     "dns": dns_for(profile, safe_options)}))
+                                                     "dns": dns_for(profile, safe_options), "transport": transport}))
                 result = self.status()
                 if result["state"] != "active" or not result["owned"]:
                     raise RuntimeError(result.get("message") or "WireGuard did not report an active interface")
@@ -534,8 +571,10 @@ class DeviceVPN:
                 if runtime["state"] == "inactive":
                     _remove(self.marker)
                     _remove(self.windows_config)
+                    self._stop_relay()
                 elif not started:
                     _remove(self.marker)
+                    self._stop_relay()
                 raise RuntimeError(f"Could not start WireGuard: {clean_error(error)}") from error
 
     def disconnect(self) -> dict[str, Any]:
@@ -544,6 +583,7 @@ class DeviceVPN:
             if current["state"] == "inactive":
                 _remove(self.marker)
                 _remove(self.windows_config)
+                self._stop_relay()
                 return self.status()
             if not current["owned"]:
                 raise RuntimeError("This interface was not started by OpenPath; stop it with its original client")
@@ -568,4 +608,5 @@ class DeviceVPN:
                 raise RuntimeError("WireGuard did not confirm that the interface or service was removed")
             _remove(self.marker)
             _remove(self.windows_config)
+            self._stop_relay()
             return self.status()

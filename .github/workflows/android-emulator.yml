@@ -29,6 +29,13 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: gradle/actions/setup-gradle@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - name: Install relay test dependencies
+        run: npm ci --prefix server
       - name: Build app and instrumentation APKs
         shell: bash
         working-directory: client/android

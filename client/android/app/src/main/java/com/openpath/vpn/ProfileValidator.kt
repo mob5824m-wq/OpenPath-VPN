@@ -3,6 +3,7 @@ package com.openpath.vpn
 import com.wireguard.config.Config
 import com.wireguard.config.InetAddresses
 import com.wireguard.config.Interface
+import com.wireguard.config.Peer
 import java.io.ByteArrayInputStream
 import java.net.Inet4Address
 import java.net.Inet6Address
@@ -77,6 +78,17 @@ object ProfileValidator {
         }
         require(!iface.mtu.isPresent || iface.mtu.get() in 576..9000) { "MTU must be between 576 and 9000." }
         return config
+    }
+
+    /** Change only the endpoint; the TLS relay is a local WireGuard datagram bridge. */
+    fun withStealthEndpoint(config: Config, port: Int): Config {
+        require(port in 1..65535) { "Invalid local relay port." }
+        val original = config.peers.single()
+        val peer = Peer.Builder().setPublicKey(original.publicKey).addAllowedIps(original.allowedIps)
+            .parseEndpoint("127.0.0.1:$port")
+        original.preSharedKey.ifPresent { peer.setPreSharedKey(it) }
+        original.persistentKeepalive.ifPresent { peer.setPersistentKeepalive(it) }
+        return Config.Builder().setInterface(config.`interface`).addPeer(peer.build()).build()
     }
 
     /** Rebuild only the interface DNS; never alter the peer, keys or routes. */

@@ -31,6 +31,11 @@ class MainActivity : Activity() {
     private var page = 0
     private var mode = "profile"
     private var customDns = ""
+    private var transport = "direct"
+    private var relayServer = ""
+    private var relayUser = ""
+    // Never persist relay credentials; they live only in the current process.
+    private var relayPsk = ""
     private val modes = arrayOf("profile", "malware", "ads", "custom")
     private val modeLabels = arrayOf("Profile DNS (Cloudflare fallback)", "Quad9 — malware filtering", "AdGuard DNS — ads, trackers and malware", "Custom DNS IPs")
     private val backgroundColor = Color.rgb(9, 9, 15)
@@ -45,6 +50,10 @@ class MainActivity : Activity() {
         mode = preferences.getString("dns_mode", "profile") ?: "profile"
         if (mode !in modes) mode = "profile"
         customDns = preferences.getString("custom_dns", "") ?: ""
+        transport = preferences.getString("transport", "direct") ?: "direct"
+        if (transport !in setOf("direct", "stealth")) transport = "direct"
+        relayServer = preferences.getString("relay_server", "") ?: ""
+        relayUser = preferences.getString("relay_user", "") ?: ""
         render()
     }
 
@@ -194,6 +203,23 @@ class MainActivity : Activity() {
             addView(text(manager.message, 13f, muted))
             addView(spacing(8))
             addView(text("An active interface does not prove a peer handshake or internet access.", 12f, muted))
+            addView(spacing(10))
+            addView(text("Device VPN transport", 13f, muted))
+            val choices = arrayOf("Direct WireGuard (UDP)", "Stealth WireGuard over TLS relay")
+            val spinner = Spinner(this@MainActivity).apply {
+                adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, choices)
+                setSelection(if (transport == "stealth") 1 else 0)
+                contentDescription = "Device VPN transport"
+                isEnabled = !manager.active && !manager.working
+                onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                    override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+                    override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                        transport = if (position == 1) "stealth" else "direct"
+                        preferences.edit().putString("transport", transport).apply()
+                    }
+                }
+            }
+            addView(spinner, LinearLayout.LayoutParams(-1, dp(48)))
             if (manager.active) addAction("Disconnect", !manager.working) { manager.disconnect() }
             else addAction("Connect WireGuard", manager.configured && !manager.working, true) { requestVpn() }
             if (!manager.configured) addAction("Import a profile", !manager.working) { chooseProfile() }
@@ -203,7 +229,7 @@ class MainActivity : Activity() {
             addAction("Change DNS settings", !manager.working) { page = 2; render() }
         }
         addCard("About this connection") {
-            addView(text("This app uses WireGuard over UDP with an operator-provided server. The separate OpenPath WebSocket session is not implemented in this Android app.", 13f, muted))
+            addView(text("Direct uses WireGuard over UDP. Stealth carries WireGuard through the authenticated TLS relay configured in Settings. It needs an operator-provided relay and does not guarantee bypassing restrictions.", 13f, muted))
         }
     }
 
@@ -269,6 +295,34 @@ class MainActivity : Activity() {
             addView(custom, LinearLayout.LayoutParams(-1, -2))
             if (manager.active) { addView(spacing(8)); addView(text("Disconnect to change DNS.", 12f, muted)) }
         }
+        addCard("Stealth relay") {
+            addView(text("Enter the WSS server and its relay credentials. The PSK stays in memory and must be re-entered after the app is closed. The relay requires a trusted TLS certificate.", 13f, muted))
+            fun field(label: String, value: String, secret: Boolean = false, update: (String) -> Unit): EditText =
+                EditText(this@MainActivity).apply {
+                    hint = label
+                    setSingleLine(true)
+                    setTextColor(Color.WHITE)
+                    setHintTextColor(muted)
+                    if (secret) inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+                    setText(value)
+                    contentDescription = label
+                    isEnabled = !manager.active && !manager.working
+                    addTextChangedListener(object : TextWatcher {
+                        override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+                        override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = update(s?.toString() ?: "")
+                        override fun afterTextChanged(s: Editable?) = Unit
+                    })
+                }
+            addView(field("wss://relay.example.com", relayServer) {
+                relayServer = it; preferences.edit().putString("relay_server", it).apply()
+            })
+            addView(field("Relay username", relayUser) {
+                relayUser = it; preferences.edit().putString("relay_user", it).apply()
+            })
+            addView(field("Relay PSK (memory only)", relayPsk, true) { relayPsk = it })
+            addView(spacing(8))
+            addView(text("The relay socket is protected from VPN recursion. Android always-on/lockdown is not supported; network changes may require disconnecting and reconnecting.", 12f, muted))
+        }
         addCard("Privacy and limitations") {
             addView(text("No general kill switch, automatic reconnect, live handshake verification or app-specific filtering is provided. Android may replace or stop this VPN; confirm its status in system settings. Private DNS and DNS-over-HTTPS may bypass resolver filtering.", 13f, muted))
         }
@@ -301,7 +355,7 @@ class MainActivity : Activity() {
     private fun requestVpn() {
         try {
             val request = VpnService.prepare(this)
-            if (request == null) manager.connect(mode, customDns)
+            if (request == null) manager.connect(mode, customDns, transport, relayServer, relayUser, relayPsk)
             else startActivityForResult(request, REQUEST_VPN)
         } catch (_: Exception) {
             AlertDialog.Builder(this).setMessage("Android could not request VPN permission.").setPositiveButton("OK", null).show()
@@ -313,7 +367,7 @@ class MainActivity : Activity() {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == REQUEST_PROFILE && resultCode == RESULT_OK) data?.data?.let { manager.importProfile(it) }
         if (requestCode == REQUEST_VPN) {
-            if (resultCode == RESULT_OK) manager.connect(mode, customDns)
+            if (resultCode == RESULT_OK) manager.connect(mode, customDns, transport, relayServer, relayUser, relayPsk)
             else AlertDialog.Builder(this).setMessage("VPN permission was not granted. No connection was started.").setPositiveButton("OK", null).show()
         }
     }

@@ -28,6 +28,7 @@ android {
 dependencies {
     // Official WireGuard Android userspace tunnel (not the OpenPath WebSocket session).
     implementation 'com.wireguard.android:tunnel:1.0.20260102'
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'org.robolectric:robolectric:4.14.1'

@@ -41,19 +41,35 @@ class VpnIntegrationTest {
         try {
             assertNull("Emulator VPN consent was not granted", VpnService.prepare(context))
             assertTrue(manager.configured)
+            // Invalid relay credentials must not start direct WireGuard as a fallback.
+            assertTrue(manager.connect("profile", "", "stealth", "wss://10.0.2.2:18443", "ci-test", "wrong"))
+            waitForOperation(manager)
+            assertFalse("Rejected Stealth must not fall back to direct UDP", manager.active)
+
+            fun exchange() {
+                // This app socket is NOT excluded from VPN; only the outer TLS socket is protected.
+                Socket().use { socket ->
+                    socket.connect(InetSocketAddress("10.203.0.1", 19430), 10000)
+                    socket.soTimeout = 10000
+                    socket.getOutputStream().write("openpath".toByteArray())
+                    val reply = ByteArray(2)
+                    java.io.DataInputStream(socket.getInputStream()).readFully(reply)
+                    assertEquals("ok", String(reply))
+                }
+            }
             assertTrue(manager.connect("profile", ""))
             waitForOperation(manager)
-            assertTrue("WireGuard did not start: ${manager.message}", manager.active)
+            assertTrue("Direct WireGuard did not start: ${manager.message}", manager.active)
+            exchange()
+            assertTrue(manager.disconnect())
+            waitForOperation(manager)
+            assertFalse(manager.active)
 
-            // This address is reachable only through the CI's local WireGuard peer.
-            Socket().use { socket ->
-                socket.connect(InetSocketAddress("10.203.0.1", 19430), 10000)
-                socket.soTimeout = 10000
-                socket.getOutputStream().write("openpath".toByteArray())
-                val reply = ByteArray(2)
-                java.io.DataInputStream(socket.getInputStream()).readFully(reply)
-                assertEquals("ok", String(reply))
-            }
+            assertTrue(manager.connect("profile", "", "stealth", "wss://10.0.2.2:18443", "ci-test", "only-for-disposable-ci-tests"))
+            waitForOperation(manager)
+            assertTrue("Stealth WireGuard did not start: ${manager.message}", manager.active)
+            assertEquals("connected", manager.relayState)
+            exchange()
         } finally {
             if (manager.active && manager.disconnect()) waitForOperation(manager)
             store.remove()

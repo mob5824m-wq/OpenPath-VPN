@@ -13,6 +13,7 @@ import { ReleaseService } from './releases.js';
 import hostsRouter from './hosts/routes.js';
 import { startRegistryPruner, listHosts } from './hosts/registry.js';
 import { startSubRegistration } from './subHost.js';
+import { StealthRelayServer, STEALTH_PATH } from './stealth/relay.js';
 
 const packageVersion = (JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {version:string}).version;
 const app = express();
@@ -115,9 +116,14 @@ const server = http.createServer(app);
 
 const wss = new WebSocketServer({ noServer: true });
 const fastWss = new WebSocketServer({ noServer: true });
+const stealthRelay = new StealthRelayServer(process.env.STEALTH_WG_TARGET || '', process.env.STEALTH_TRUST_PROXY === '1', config.psks);
 
 server.on('upgrade', (req, socket, head)=>{
   const url = new URL(req.url || '/', `http://${req.headers.host}`);
+  if (url.pathname === STEALTH_PATH) {
+    stealthRelay.handleUpgrade(req, socket, head, url);
+    return;
+  }
   const isFast = url.pathname.startsWith(config.fastPath) || url.searchParams.get('mode') === 'fast' || url.searchParams.get('fast') === '1';
   const pathOk = url.pathname.startsWith(config.opsPath) || url.pathname.startsWith(config.fastPath);
   if (!pathOk) {
