@@ -61,6 +61,10 @@ app.on('activate', () => { if (BrowserWindow.getAllWindows().length===0) createW
 (app as any).quitting=false; app.on('before-quit', ()=> (app as any).quitting=true);
 
 // IPC
+ipcMain.on('window:minimize', () => win?.minimize());
+ipcMain.on('window:maximize', () => { if(!win) return; win.isMaximized() ? win.unmaximize() : win.maximize(); });
+ipcMain.on('window:close', () => { if (win) { (app as any).quitting = true; win.close(); } });
+
 ipcMain.handle('config:get', () => loadConfig());
 ipcMain.handle('config:set', (_e, c) => { saveConfig(c); return { ok:true }; });
 

@@ -15,4 +15,9 @@ contextBridge.exposeInMainWorld('openpathLinux', {
   // shared with desktop
   tunStart: (cfg:any) => ipcRenderer.invoke('tun:start', cfg),
   tunStop: () => ipcRenderer.invoke('tun:stop'),
+  window: {
+    minimize: () => ipcRenderer.send('window:minimize'),
+    maximize: () => ipcRenderer.send('window:maximize'),
+    close: () => ipcRenderer.send('window:close'),
+  },
 });
