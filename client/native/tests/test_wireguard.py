@@ -275,12 +275,14 @@ class WireGuardTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             vpn = DeviceVPN(root, platform="win32", keychain=FakeKeychain())
             vpn.init_dir()
-            script = ("$a=Get-Acl $env:OPVPN_DIRECTORY; "
-                      "$a.AreAccessRulesProtected; "
-                      "$a.Access | ForEach-Object { $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value }")
-            output = subprocess.run([vpn.windows_tool("powershell"), "-NoProfile", "-NonInteractive", "-Command", script],
-                                    env={**os.environ, "OPVPN_DIRECTORY": str(vpn.directory)}, capture_output=True, text=True, check=True).stdout
-            self.assertTrue(output.strip().lower().startswith("true"), repr(output))
+            script = ("$ErrorActionPreference='Stop'; $a=[System.IO.Directory]::GetAccessControl($env:OPVPN_DIRECTORY); "
+                      "[Console]::Out.WriteLine($a.AreAccessRulesProtected); "
+                      "$a.GetAccessRules($true,$true,[System.Security.Principal.SecurityIdentifier]) | "
+                      "ForEach-Object { [Console]::Out.WriteLine($_.IdentityReference.Value) }")
+            result = subprocess.run([vpn.windows_tool("powershell"), "-NoProfile", "-NonInteractive", "-Command", script],
+                                    env={**os.environ, "OPVPN_DIRECTORY": str(vpn.directory)}, capture_output=True, text=True, check=True)
+            output = result.stdout
+            self.assertTrue(output.strip().lower().startswith("true"), f"stdout={output!r} stderr={result.stderr!r}")
             self.assertIn("S-1-5-18", output)
             self.assertNotIn("S-1-1-0", output)  # Everyone
 

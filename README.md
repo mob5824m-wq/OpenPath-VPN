@@ -11,16 +11,25 @@ There are two distinct connections:
 
 ## Native desktop app
 
-Download a desktop installer from a release that includes one, or run from source with Python 3.10+:
+Download a desktop installer from a release that includes one, or run from source with Python 3.10+. On Linux or macOS:
 
 ```bash
 python3 -m venv .venv
-. .venv/bin/activate                # Windows: .venv\Scripts\activate
-pip install -r client/native/requirements.txt
+. .venv/bin/activate
+python -m pip install -r client/native/requirements.txt
 python client/native/entry.py
 ```
 
-The **Home** page imports a WireGuard profile and starts or stops the device VPN. **Session** connects to the separate OpenPath WebSocket server, lists online locations actually advertised by that server, and fetches a single URL through it. Enter the WebSocket server URL, username and PSK in **Settings**; the PSK stays in process memory and is never saved by the app. **Releases** lists real published GitHub assets and opens selected downloads in the system browser. See [native desktop development and packaging](client/native/README.md).
+On Windows PowerShell:
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r client/native/requirements.txt
+python client/native/entry.py
+```
+
+The **Home** page imports a WireGuard profile and starts or stops the device VPN. To use the separate OpenPath WebSocket session, enter your server URL and username in **Settings**, select **Save server settings**, and enter the PSK. Then open **Session** to refresh advertised locations, choose a server and mode, and connect or fetch a single URL through it. The PSK stays in process memory and is never saved by the app. **Releases** lists real published GitHub assets and opens selected downloads or the release page in the system browser. See [native desktop development and packaging](client/native/README.md).
 
 ### Device-wide WireGuard VPN
 
