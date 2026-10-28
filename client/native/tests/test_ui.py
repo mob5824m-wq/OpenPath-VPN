@@ -1,5 +1,6 @@
 """Actual Qt Widgets controls exercised offscreen with injected platform operations."""
 import os
+import sys
 from pathlib import Path
 import tempfile
 import threading
@@ -174,6 +175,32 @@ class UITests(unittest.TestCase):
         self.wait_for_device()
         self.assertEqual(self.vpn.imported, "/tmp/profile.conf")
         self.assertTrue(w.connect_button.isEnabled())
+
+    def test_stealth_transport_uses_settings_without_persisting_psk(self):
+        w = self.window
+        w.server_input.setText("wss://relay.example/ops")
+        w.user_input.setText("relay-user")
+        w.psk_input.setText("relay-secret-in-memory")
+        w.vpn_transport.setCurrentIndex(w.vpn_transport.findData("stealth"))
+        # A Windows acknowledgement dialog is required before the /1 routes.
+        if sys.platform == "win32":
+            from PySide6.QtWidgets import QMessageBox
+            with patch.object(QMessageBox, "warning", return_value=QMessageBox.StandardButton.Yes):
+                w.connect_button.click()
+        else:
+            w.connect_button.click()
+        self.wait_for_device()
+        self.assertEqual(self.vpn.options["transport"], "stealth")
+        self.assertEqual(self.vpn.options["relayServer"], "wss://relay.example/ops")
+        self.assertEqual(self.vpn.options["relayPsk"], "relay-secret-in-memory")
+        if sys.platform == "win32":
+            self.assertEqual(self.vpn.options["allowWindowsStealthWithoutKillSwitch"], "yes")
+        self.settings.sync()
+        self.assertNotIn("relay-secret-in-memory", Path(self.settings.fileName()).read_text())
+        self.assertFalse(w.vpn_transport.isEnabled())
+        w.disconnect_button.click()
+        self.wait_for_device()
+        self.assertTrue(w.vpn_transport.isEnabled())
 
     def test_session_settings_locations_connect_fetch_and_disconnect(self):
         w = self.window

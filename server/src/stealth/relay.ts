@@ -13,6 +13,22 @@ const MAX_QUEUED = 1024 * 1024;
 const MAX_CLIENTS = 128;
 const FORBIDDEN_DEMO = 'demo-student-key-do-not-use-prod';
 
+
+/** Relay credentials are distinct from demo/session PSKs, which the legacy
+ * provisioning endpoint can disclose. Fail startup if enabled without strong
+ * independently configured secrets. */
+export function parseRelayPsks(value:string, enabled:boolean):Record<string,string> {
+  if (!value && !enabled) return {};
+  let parsed:unknown;
+  try { parsed = JSON.parse(value); } catch { throw new Error('STEALTH_PSKS must be a JSON map of users to independent relay secrets'); }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || Object.keys(parsed).length === 0 ||
+      Object.entries(parsed).some(([user, secret]) => !user || user.length > 128 || /[\x00-\x1f]/.test(user) ||
+        typeof secret !== 'string' || Buffer.byteLength(secret, 'utf8') < 32 || secret === FORBIDDEN_DEMO)) {
+    throw new Error('STEALTH_PSKS requires nonempty users with independent secrets of at least 32 bytes');
+  }
+  return parsed as Record<string,string>;
+}
+
 type Target = { address:string; port:number; family:'udp4'|'udp6' };
 export function parseRelayTarget(value:string):Target {
   const match = /^(?:\[([^\]]+)\]|([^:]+)):(\d{1,5})$/.exec(value);
@@ -51,7 +67,7 @@ export class StealthRelayServer {
     const user = url.searchParams.get('user') || 'demo';
     const peer = req.socket.remoteAddress || 'unknown';
     if (!this.enabled || !secure || this.wss.clients.size >= MAX_CLIENTS || this.psks[user] === FORBIDDEN_DEMO ||
-        !validateAuth(url, peer, true).ok) {
+        !validateAuth(url, peer, true, this.psks).ok) {
       socket.write('HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n');
       socket.destroy();
       return;

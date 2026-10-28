@@ -5,8 +5,8 @@ import { createServer } from 'node:http';
 import { createSocket } from 'node:dgram';
 import WebSocket from 'ws';
 
-process.env.OPSK = JSON.stringify({'relay-user':'test-secret-for-stealth-relay-tests'});
-const { StealthRelayServer, isWireGuardPacket, parseRelayTarget } = await import('../src/stealth/relay.js');
+process.env.OPSK = JSON.stringify({'legacy-user':'a-separate-legacy-credential'});
+const { StealthRelayServer, isWireGuardPacket, parseRelayTarget, parseRelayPsks } = await import('../src/stealth/relay.js');
 const target = createSocket('udp4');
 await new Promise(resolve => target.bind(0, '127.0.0.1', resolve));
 let seen = 0;
@@ -38,6 +38,9 @@ test('strict packet and fixed numeric target validation', () => {
   assert.deepEqual(parseRelayTarget('[::1]:51820'), {address:'::1', port:51820, family:'udp6'});
   assert.throws(() => parseRelayTarget('localhost:51820'));
   assert.throws(() => parseRelayTarget('127.0.0.1:99999'));
+  assert.throws(() => parseRelayPsks('', true));
+  assert.throws(() => parseRelayPsks('{"user":"short"}', true));
+  assert.deepEqual(parseRelayPsks(JSON.stringify({'user':'x'.repeat(32)}), true), {'user':'x'.repeat(32)});
 });
 
 test('rejects plaintext proxy requests and tokens signed for a different path', async () => {
@@ -57,4 +60,40 @@ test('authenticated binary WireGuard packets reach only the configured UDP targe
   ws.send('not a WireGuard packet');
   await closed;
   assert.equal(seen, 1);
+});
+
+test('relay-only server disables legacy provisioning and rejects reused session secrets', async () => {
+  const { spawn } = await import('node:child_process');
+  const { createServer: createTcpServer } = await import('node:net');
+  const probe = createTcpServer();
+  await new Promise<void>(resolve => probe.listen(0, '127.0.0.1', resolve));
+  const port = (probe.address() as import('node:net').AddressInfo).port;
+  await new Promise<void>(resolve => probe.close(() => resolve()));
+  const env = {...process.env, PORT:String(port), HOST:'127.0.0.1', STEALTH_RELAY_ONLY:'1',
+    STEALTH_WG_TARGET:'127.0.0.1:51820', STEALTH_TRUST_PROXY:'1',
+    STEALTH_PSKS:JSON.stringify({'relay-user':'a-distinct-relay-secret-at-least-32-bytes'})};
+  const child = spawn(process.execPath, ['--import', 'tsx', 'src/index.ts'], {cwd:process.cwd(), env, stdio:['ignore', 'pipe', 'pipe']});
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('server startup timed out')), 10000);
+      child.stdout.on('data', chunk => { if (String(chunk).includes('Listening on')) { clearTimeout(timer); resolve(); } });
+      child.once('exit', code => { clearTimeout(timer); reject(new Error(`server exited early: ${code}`)); });
+    });
+    const base = `http://127.0.0.1:${port}`;
+    assert.equal((await fetch(`${base}/health`)).status, 200);
+    assert.equal((await fetch(`${base}/api/provision`, {method:'POST'})).status, 404);
+    assert.equal((await fetch(`${base}/api/hosts`)).status, 404);
+    assert.equal(await rejected(new WebSocket(`ws://127.0.0.1:${port}/ops`)), 404);
+  } finally {
+    child.kill();
+    await new Promise(resolve => child.once('exit', resolve));
+  }
+  const reused = spawn(process.execPath, ['--import', 'tsx', 'src/index.ts'], {
+    cwd:process.cwd(), env:{...env, OPSK:env.STEALTH_PSKS}, stdio:['ignore', 'ignore', 'pipe'],
+  });
+  const output:Buffer[] = [];
+  reused.stderr.on('data', chunk => output.push(chunk));
+  const code = await new Promise<number | null>(resolve => reused.once('exit', resolve));
+  assert.notEqual(code, 0);
+  assert.match(Buffer.concat(output).toString(), /must not reuse/);
 });

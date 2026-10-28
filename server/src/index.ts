@@ -13,12 +13,19 @@ import { ReleaseService } from './releases.js';
 import hostsRouter from './hosts/routes.js';
 import { startRegistryPruner, listHosts } from './hosts/registry.js';
 import { startSubRegistration } from './subHost.js';
-import { StealthRelayServer, STEALTH_PATH } from './stealth/relay.js';
+import { StealthRelayServer, STEALTH_PATH, parseRelayPsks } from './stealth/relay.js';
 
 const packageVersion = (JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {version:string}).version;
 const app = express();
 app.use(cors());
 app.use(express.json());
+const relayOnly = process.env.STEALTH_RELAY_ONLY === '1';
+// For a public relay, expose only the relay and a minimal health check. The
+// legacy provision/registration/session endpoints are not production-safe.
+app.use((req, res, next) => {
+  if (relayOnly && req.path !== '/health') { res.sendStatus(404); return; }
+  next();
+});
 
 // --- Health & API (with host role) ---
 app.get('/health', (_req,res)=> res.json({
@@ -116,12 +123,22 @@ const server = http.createServer(app);
 
 const wss = new WebSocketServer({ noServer: true });
 const fastWss = new WebSocketServer({ noServer: true });
-const stealthRelay = new StealthRelayServer(process.env.STEALTH_WG_TARGET || '', process.env.STEALTH_TRUST_PROXY === '1', config.psks);
+const stealthTarget = process.env.STEALTH_WG_TARGET || '';
+const relayPsks = parseRelayPsks(process.env.STEALTH_PSKS || '', !!stealthTarget);
+if (stealthTarget && Object.values(relayPsks).some(secret => Object.values(config.psks).includes(secret))) {
+  throw new Error('STEALTH_PSKS must not reuse a legacy session/provisioning PSK');
+}
+const stealthRelay = new StealthRelayServer(stealthTarget, process.env.STEALTH_TRUST_PROXY === '1', relayPsks);
 
 server.on('upgrade', (req, socket, head)=>{
   const url = new URL(req.url || '/', `http://${req.headers.host}`);
   if (url.pathname === STEALTH_PATH) {
     stealthRelay.handleUpgrade(req, socket, head, url);
+    return;
+  }
+  if (relayOnly) {
+    socket.write('HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n');
+    socket.destroy();
     return;
   }
   const isFast = url.pathname.startsWith(config.fastPath) || url.searchParams.get('mode') === 'fast' || url.searchParams.get('fast') === '1';

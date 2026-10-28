@@ -65,7 +65,7 @@ class VpnIntegrationTest {
             waitForOperation(manager)
             assertFalse(manager.active)
 
-            assertTrue(manager.connect("profile", "", "stealth", "wss://10.0.2.2:18443", "ci-test", "only-for-disposable-ci-tests"))
+            assertTrue(manager.connect("profile", "", "stealth", "wss://10.0.2.2:18443", "ci-test", "only-for-disposable-ci-tests-not-production-123"))
             waitForOperation(manager)
             assertTrue("Stealth WireGuard did not start: ${manager.message}", manager.active)
             assertEquals("connected", manager.relayState)

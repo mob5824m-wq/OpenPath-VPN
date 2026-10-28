@@ -25,6 +25,65 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  stealth-linux:
+    name: Linux Stealth relay traffic
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install test dependencies
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends wireguard-tools iproute2 iputils-ping
+          npm ci --prefix server
+          python -m pip install websockets==15.0.1
+      - name: Verify actual WireGuard traffic through TLS and failure behavior
+        shell: bash
+        run: sudo env "PATH=$PATH" unshare -mn bash scripts/test-stealth-linux.sh
+
+  stealth-windows:
+    name: Windows Stealth relay handshake
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install WireGuard and relay test dependencies
+        shell: pwsh
+        run: |
+          choco install wireguard --version=1.1.1 -y --no-progress
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm ci --prefix server
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pip install websockets==15.0.1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify a real WireGuardNT handshake through TLS
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = "$pwd\client\native"
+          python scripts/test-stealth-windows.py 2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP\stealth-windows.log"
+          $code = $LASTEXITCODE
+          if ($code -ne 0) {
+            $tail = (Get-Content "$env:RUNNER_TEMP\stealth-windows.log" -Tail 25) -join ' '
+            Write-Output "::error::Windows Stealth handshake failed: $tail"
+            exit $code
+          }
+
   linux:
     name: Linux x64 native app
     timeout-minutes: 30

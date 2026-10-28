@@ -3,7 +3,7 @@ import { createServer } from 'node:https';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-process.env.OPSK = JSON.stringify({'ci-test':'only-for-disposable-ci-tests'});
+process.env.OPSK = JSON.stringify({'ci-test':'only-for-disposable-ci-tests-not-production-123'});
 const { StealthRelayServer } = await import('../../src/stealth/relay.js');
 const relay = new StealthRelayServer(process.env.TEST_WG_TARGET || '127.0.0.1:51820', true, JSON.parse(process.env.OPSK));
 const key = readFileSync(fileURLToPath(new URL('./stealth-test-key.pem', import.meta.url)));

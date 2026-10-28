@@ -16,7 +16,7 @@ function cleanupBad() {
 }
 setInterval(cleanupBad, 30000).unref?.();
 
-export function validateAuth(url: URL, ip: string, exactPath = false): AuthResult {
+export function validateAuth(url: URL, ip: string, exactPath = false, psks:Record<string,string> = config.psks): AuthResult {
   const now = Date.now();
 
   // tarpit check
@@ -25,8 +25,8 @@ export function validateAuth(url: URL, ip: string, exactPath = false): AuthResul
 
   const auth = url.searchParams.get('auth');
   const user = url.searchParams.get('user') || 'demo';
-  const psk = config.psks[user];
-  if (!psk) return { ok: false, reason: 'unknown-user' };
+  const psk = Object.hasOwn(psks, user) ? psks[user] : undefined;
+  if (typeof psk !== 'string' || !psk) return { ok: false, reason: 'unknown-user' };
   if (!auth) return { ok: false, reason: 'missing-auth' };
 
   // auth format: ts.nonce.hmac
