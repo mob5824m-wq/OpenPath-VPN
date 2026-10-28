@@ -31,6 +31,9 @@ jobs:
     runs-on: ubuntu-24.04
     # Build against glibc 2.35 for Ubuntu 22.04-compatible binaries.
     container: ubuntu:22.04
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Install build and Qt dependencies
         run: |

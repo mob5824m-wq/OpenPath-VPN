@@ -115,7 +115,7 @@ class WireGuardTests(unittest.TestCase):
             def run(args, **kwargs):
                 nonlocal active, protected, config_file
                 script = args[-1]
-                if "DirectorySecurity" in script:
+                if "Directory]::GetAccessControl" in script:
                     protected = True
                     self.assertIn("SetAccessRuleProtection($true,$false)", script)
                     self.assertIn("S-1-5-18", script)
@@ -249,7 +249,7 @@ class WireGuardTests(unittest.TestCase):
             def run(args, **kwargs):
                 nonlocal state, config_file
                 script = args[-1]
-                if "DirectorySecurity" in script:
+                if "Directory]::GetAccessControl" in script:
                     return ""
                 if "Get-Service" in script:
                     return state
@@ -280,7 +280,7 @@ class WireGuardTests(unittest.TestCase):
                       "$a.Access | ForEach-Object { $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value }")
             output = subprocess.run([vpn.windows_tool("powershell"), "-NoProfile", "-NonInteractive", "-Command", script],
                                     env={**os.environ, "OPVPN_DIRECTORY": str(vpn.directory)}, capture_output=True, text=True, check=True).stdout
-            self.assertTrue(output.lower().startswith("true"))
+            self.assertTrue(output.strip().lower().startswith("true"), repr(output))
             self.assertIn("S-1-5-18", output)
             self.assertNotIn("S-1-1-0", output)  # Everyone
 

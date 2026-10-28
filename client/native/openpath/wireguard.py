@@ -314,8 +314,9 @@ class DeviceVPN:
         # service runs as SYSTEM; the current user must also manage the files.
         script = "; ".join((
             "$ErrorActionPreference='Stop'",
-            '$acl=New-Object System.Security.AccessControl.DirectorySecurity',
+            '$acl=[System.IO.Directory]::GetAccessControl($env:OPVPN_DIRECTORY)',
             '$acl.SetAccessRuleProtection($true,$false)',
+            'foreach($rule in @($acl.GetAccessRules($true,$true,[System.Security.Principal.SecurityIdentifier]))){ $acl.RemoveAccessRuleAll($rule) }',
             '$user=[System.Security.Principal.WindowsIdentity]::GetCurrent().User',
             "$system=New-Object System.Security.Principal.SecurityIdentifier('S-1-5-18')",
             "$inherit=[System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'",
@@ -323,6 +324,11 @@ class DeviceVPN:
             '$type=[System.Security.AccessControl.AccessControlType]::Allow',
             "foreach($sid in @($user,$system)){ $rule=New-Object System.Security.AccessControl.FileSystemAccessRule($sid,'FullControl',$inherit,$propagation,$type); $acl.AddAccessRule($rule) }",
             '[System.IO.Directory]::SetAccessControl($env:OPVPN_DIRECTORY,$acl)',
+            '$check=[System.IO.Directory]::GetAccessControl($env:OPVPN_DIRECTORY)',
+            "if(-not $check.AreAccessRulesProtected){throw 'Could not protect the VPN configuration directory'}",
+            '$seen=@{}',
+            "foreach($rule in $check.GetAccessRules($true,$true,[System.Security.Principal.SecurityIdentifier])){ $sid=$rule.IdentityReference.Value; if($rule.IsInherited -or $rule.AccessControlType -ne $type -or ($sid -ne $user.Value -and $sid -ne $system.Value)){throw 'Unexpected VPN configuration directory access rule'}; $seen[$sid]=$true }",
+            "if(-not $seen[$user.Value] -or -not $seen[$system.Value]){throw 'Missing VPN configuration directory access rule'}",
         ))
         self.run([self.windows_tool("powershell"), "-NoProfile", "-NonInteractive", "-Command", script], env={"OPVPN_DIRECTORY": str(self.directory)})
 
