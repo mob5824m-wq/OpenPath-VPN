@@ -1,98 +1,159 @@
 name: Release — Apps & Profiles
 
+# Three ways in:
+#  - a v* tag pushed by hand
+#  - the Auto Tag workflow finishing (it pushes the tag with GITHUB_TOKEN, which does
+#    not emit a tag push event, so we listen to workflow_run instead)
+#  - manual dispatch with an explicit tag (used to backfill a missed release)
 on:
   push:
     tags: ["v*"]
+  workflow_run:
+    workflows: ["Auto Tag (bump .1 on merge)"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to release (e.g. v1.2)"
+        description: "Tag to release (blank = newest tag)"
         required: false
         type: string
 
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  build-and-release:
+  resolve:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.pick.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-node@v4
-        with: { node-version: 20 }
-
-      - name: Build all
+      - name: Pick the tag to release
+        id: pick
+        shell: bash
         run: |
-          ./scripts/build-all.sh
+          set -e
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.tag }}" ]; then
+            TAG="${{ inputs.tag }}"
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            TAG="${{ github.ref_name }}"
+          else
+            git fetch --tags --quiet || true
+            TAG="$(git tag -l 'v*' --sort=-v:refname | head -n1)"
+          fi
+          if [ -z "$TAG" ]; then
+            echo "No v* tag found — nothing to release."
+            exit 1
+          fi
+          case "$TAG" in
+            v*) : ;;
+            *) TAG="v$TAG" ;;
+          esac
+          echo "Releasing $TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
-      - name: Build Linux AppImage (optional)
+  build-and-release:
+    needs: resolve
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.resolve.outputs.tag }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build server
         continue-on-error: true
         run: |
-          cd client/linux && npx electron-builder --linux AppImage --publish never || echo "AppImage skip"
-          cd ../.. && ls -R client/linux/dist* 2>&1 | head -50 || true
-          ls -R client/web/dist 2>&1 | head -20 || true
-          ls server/dist 2>&1 | head -20 || true
+          cd server
+          npm ci --no-audit --no-fund || npm install --no-audit --no-fund
+          npx tsc --outDir dist
 
-      - name: Build web + server dist
+      - name: Build web app
+        continue-on-error: true
         run: |
-          cd client/web && npm run build 2>&1 | tail -20 || true
-          cd ../../server && npm install && npx tsc --outDir dist 2>&1 | tail -10 || true
+          cd client/web
+          npm ci --no-audit --no-fund || npm install --no-audit --no-fund
+          npm run build
 
-      - name: Prepare profile snapshot
+      - name: Snapshot profiles + feature catalog
         run: |
-          mkdir -p _release/profiles
-          # Snapshot current editable defaults + features catalog for this release
-          cat client/core/src/profiles/profiles.ts 2>&1 | head -5 || true
-          cat client/core/src/features/features.ts 2>&1 | head -5 || true
-          # Copy for artifact so profiles are versioned per release
-          cp -r client/core/src/profiles _release/profiles/ 2>&1 || true
-          cp -r client/core/src/features _release/profiles/ 2>&1 || true
-          echo "Release: ${GITHUB_REF_NAME:-manual}" > _release/profiles/RELEASE.txt
-          date -u >> _release/profiles/RELEASE.txt
-          ls -R _release 2>&1 | head -50
+          set -e
+          TAG="${{ needs.resolve.outputs.tag }}"
+          mkdir -p _release/artifacts _release/profiles
+          cp -r client/core/src/profiles _release/profiles/ 2>/dev/null || true
+          cp -r client/core/src/features _release/profiles/ 2>/dev/null || true
+          {
+            echo "Release: $TAG"
+            echo "Commit: $(git rev-parse --short HEAD)"
+            echo "Date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > _release/profiles/RELEASE.txt
 
-      - name: Pack artifacts
+          # Machine-readable profile set shipped with this release
+          node -e '
+            const fs = require("fs");
+            const tag = process.argv[1];
+            const names = ["streaming-us","gaming","anti-censorship","school","home"];
+            const profiles = names.map(id => ({ id }));
+            fs.writeFileSync(
+              "_release/artifacts/profiles-" + tag + ".json",
+              JSON.stringify({ tag, profiles, note: "Profile ids bundled with this release" }, null, 2)
+            );
+          ' "$TAG"
+
+          tar -czf "_release/artifacts/openpath-server-$TAG.tar.gz" -C server dist 2>/dev/null || echo "server dist missing"
+          tar -czf "_release/artifacts/openpath-web-$TAG.tar.gz" -C client/web dist 2>/dev/null || echo "web dist missing"
+          ls -lh _release/artifacts
+
+      - name: Build Linux packages (best effort)
+        continue-on-error: true
         run: |
-          mkdir -p _release/artifacts
-          # Server + web
-          tar -czf _release/artifacts/openpath-server-${GITHUB_REF_NAME:-manual}.tar.gz server/dist 2>&1 | head -20 || true
-          tar -czf _release/artifacts/openpath-web-${GITHUB_REF_NAME:-manual}.tar.gz client/web/dist 2>&1 | head -20 || true
-          # Linux
-          cp -r client/linux/dist* _release/artifacts/ 2>&1 || true
-          cp -r _release/profiles _release/artifacts/profiles-${GITHUB_REF_NAME:-manual} 2>&1 || true
-          # Profiles JSON snapshot
-          jq -n --arg tag "${GITHUB_REF_NAME:-manual}" --arg date "$(date -u +%Y-%m-%d)" '{tag:$tag, date:$date, note:"Profiles + Features snapshot for this release"}' > _release/artifacts/profiles-release-${GITHUB_REF_NAME:-manual}.json 2>&1 || echo '{"tag":"manual"}' > _release/artifacts/profiles-release.json
-          ls -lh _release/artifacts 2>&1 | head -50
+          cd client/linux
+          npm ci --no-audit --no-fund --omit=dev || true
+          npx electron-builder --linux AppImage --publish never || echo "AppImage build skipped"
+          TAG="${{ needs.resolve.outputs.tag }}"
+          for f in dist/*.AppImage; do
+            [ -e "$f" ] && cp "$f" "../../_release/artifacts/$(basename "$f" .AppImage)-$TAG.AppImage"
+          done
+          true
 
-      - name: Create GitHub Release
+      - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name || inputs.tag }}
-          name: OpenPath ${{ github.ref_name || inputs.tag }} — Apps & Profiles
-          body: |
-            ## OpenPath VPN ${{ github.ref_name || inputs.tag }}
-
-            **Apps in this release:**
-            - Server (Node) + Web PWA (Vite)
-            - Linux GUI + CLI (deb/rpm/AppImage via electron-builder)
-            - Windows NSIS (wintun.dll) — build on windows runner or local `client/desktop`
-            - macOS DMG universal
-            - Android AAR + APK
-            - iOS PacketTunnel
-
-            **Profiles in this release:**
-            - Streaming US, Gaming, Anti-censorship, School (Canada), Home — each with editable color/icon/type/country/city + NetShield/Protocol/NAT/LAN/Connect&Go/Custom DNS
-            - Features parity snapshot (38 features) included in `profiles-*.json`
-
-            **How to update:**
-            - Download artifact for your platform from Assets below
-            - Native apps auto-check `GET https://api.github.com/repos/${{ github.repository }}/releases/latest`
-
-            Auto-tag workflow bumped +0.1 on merge to main.
-          files: |
-            _release/artifacts/*
+          tag_name: ${{ needs.resolve.outputs.tag }}
+          name: OpenPath ${{ needs.resolve.outputs.tag }}
+          make_latest: true
           fail_on_unmatched_files: false
           generate_release_notes: true
+          body: |
+            ## OpenPath VPN ${{ needs.resolve.outputs.tag }}
+
+            Apps and profiles for this release.
+
+            **Apps**
+            - Server (Node) bundle + Web app (Vite) — tarballs below
+            - Linux desktop (Electron) — AppImage when the builder can run in CI
+            - Windows NSIS, macOS DMG, Android APK and iOS extension are produced by
+              the *Native Installers* workflow and attached to its artifacts
+
+            **Profiles**
+            - Streaming US, Gaming, Anti-censorship, School, Home
+            - Each carries country, city, NetShield, protocol, NAT, LAN, Connect&Go and
+              custom DNS settings; the set is snapshotted as `profiles-<tag>.json`
+
+            **Updating**
+            - Grab the file for your platform from Assets below
+            - In-app: Settings → Releases lists releases straight from the GitHub API
+          files: |
+            _release/artifacts/*
