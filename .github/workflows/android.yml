@@ -17,7 +17,9 @@ permissions:
 jobs:
   android:
     name: Android native app and test-signed APK
-    runs-on: ubuntu-latest
+    # The hosted image includes the Android SDK and licenses. Pinning the image
+    # also avoids an unexpected Android toolchain change during label migration.
+    runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
@@ -27,9 +29,13 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v3
-      - name: Install Android SDK 36
-        run: sdkmanager --install 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Check the hosted Android SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${ANDROID_HOME:?Android SDK is not configured}"
+          test -f "$ANDROID_HOME/platforms/android-36/android.jar" || { echo '::error::Android platform 36 is missing'; exit 1; }
+          test -x "$ANDROID_HOME/build-tools/36.0.0/apksigner" || { echo '::error::Android build tools 36.0.0 are missing'; exit 1; }
       - uses: gradle/actions/setup-gradle@v4
       - name: Unit tests and release APK build
         shell: bash
