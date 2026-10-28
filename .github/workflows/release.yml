@@ -147,8 +147,14 @@ jobs:
     with:
       tag: ${{ needs.resolve.outputs.tag }}
 
+  android_emulator:
+    needs: resolve
+    uses: ./.github/workflows/android-emulator.yml
+    with:
+      tag: ${{ needs.resolve.outputs.tag }}
+
   publish:
-    needs: [resolve, bundles, native, android]
+    needs: [resolve, bundles, native, android, android_emulator]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4

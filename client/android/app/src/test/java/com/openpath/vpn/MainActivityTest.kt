@@ -4,6 +4,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.LinearLayout
+import android.widget.TextView
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -30,6 +31,10 @@ class MainActivityTest {
         assertEquals(if (wide) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL, (home.parent as LinearLayout).orientation)
         all().first { it.contentDescription?.toString()?.startsWith("Profiles") == true }.performClick()
         assertTrue(all().any { it.text.toString() == "Choose .conf file" })
+        fun hasMessage(view: View): Boolean =
+            (view is TextView && view.text.toString().contains("Import a WireGuard profile from your VPN operator")) ||
+                (view is ViewGroup && (0 until view.childCount).any { hasMessage(view.getChildAt(it)) })
+        assertTrue("Profile status should be visible on the Profiles page", hasMessage(activity.window.decorView))
         all().first { it.contentDescription?.toString()?.startsWith("Settings") == true }.performClick()
         all().first { it.contentDescription?.toString()?.startsWith("Releases") == true }.performClick()
         assertTrue(all().any { it.text.toString() == "Open GitHub releases" })

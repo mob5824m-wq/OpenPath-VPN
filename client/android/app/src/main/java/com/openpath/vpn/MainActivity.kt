@@ -211,6 +211,8 @@ class MainActivity : Activity() {
         addView(text("WireGuard profile", 19f, bold = true))
         addCard(if (manager.configured) "Profile stored" else "No profile yet") {
             addView(text(if (manager.configured) "The profile is encrypted with Android Keystore. Its original file remains wherever you imported it from." else "Import a .conf file supplied by your VPN operator. It must have one peer and IPv4 and IPv6 default routes.", 13f, muted))
+            addView(spacing(8))
+            addView(text(manager.message, 13f, Color.rgb(251, 191, 36)))
             val editable = !manager.active && !manager.working
             addAction(if (manager.configured) "Replace profile" else "Choose .conf file", editable, true) { chooseProfile() }
             if (manager.configured) addAction("Remove saved profile", editable) {

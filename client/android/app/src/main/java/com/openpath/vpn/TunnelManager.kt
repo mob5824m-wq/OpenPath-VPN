@@ -28,7 +28,8 @@ class TunnelManager(private val context: Context) {
         private set
     @Volatile var configured = store.exists()
         private set
-    @Volatile var message = "Import a WireGuard profile from your VPN operator."
+    @Volatile var message = if (configured) "An encrypted profile is saved. Connect to start WireGuard."
+        else "Import a WireGuard profile from your VPN operator."
         private set
 
     private val tunnel = object : Tunnel {
