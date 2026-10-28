@@ -28,7 +28,7 @@ Section "OpenPath VPN" SEC01
 SectionEnd
 
 Section "Uninstall"
-  MessageBox MB_OK|MB_ICONINFORMATION "Disconnect the device VPN before uninstalling. Your saved profile remains in the system keychain until removed in the app."
+  MessageBox MB_OK|MB_ICONINFORMATION "Disconnect the device VPN before uninstalling. Your saved profile remains in the system keychain until removed in the app." /SD IDOK
   Delete "$SMPROGRAMS\OpenPath\OpenPath VPN.lnk"
   RMDir "$SMPROGRAMS\OpenPath"
   Delete "$INSTDIR\OpenPath.exe"
