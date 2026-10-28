@@ -304,7 +304,16 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
           PYTHONPATH: client/native
-        run: python -m unittest discover -s client/native/tests -v
+        shell: bash
+        run: |
+          set -uo pipefail
+          set +e
+          python -m unittest discover -s client/native/tests -v 2>&1 | tee "$RUNNER_TEMP/openpath-native-tests.log"
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            echo "::error::Native tests failed: $(tail -n 45 "$RUNNER_TEMP/openpath-native-tests.log" | tr '\n\r' '  ')"
+            exit "$status"
+          fi
       - id: version
         env:
           TAG: ${{ inputs.tag || 'v0.0.0-dev' }}

@@ -11,7 +11,7 @@ python client/native/entry.py
 PYTHONPATH=client/native python -m unittest discover -s client/native/tests -v
 ```
 
-On Windows PowerShell use `$env:PYTHONPATH = 'client/native'` before the test command. In a headless environment install the Qt system libraries and set `QT_QPA_PLATFORM=offscreen`; this tests controls, not a full desktop environment. Most tests use fake keychains, WireGuard tools and platform authorization; the workflow also tests a real Linux kernel tunnel through TLS in isolated namespaces. These tests don't prove a live Windows/macOS tunnel. The WebSocket PSK is held only in memory; the separate WireGuard private profile is stored in the OS keychain.
+On Windows PowerShell use `$env:PYTHONPATH = 'client/native'` before the test command. In a headless environment install the Qt system libraries and set `QT_QPA_PLATFORM=offscreen`; this tests controls, not a full desktop environment. Most tests use fake keychains, WireGuard tools and platform authorization; the workflow also tests a real Linux kernel tunnel through TLS in isolated namespaces. Windows and macOS CI also exercise local peer handshakes through TLS, but not public egress or physical-network changes. The WebSocket PSK is held only in memory; the separate WireGuard private profile is stored in the OS keychain.
 
 ## Build the native bundle
 

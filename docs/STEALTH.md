@@ -108,6 +108,7 @@ behavior. The native workflow's isolated Linux namespace test exercises a real
 kernel WireGuard handshake and traffic over TLS, plus relay failure without
 direct fallback; it does not exercise actual DNS/firewall configuration. The
 Android emulator workflow exercises direct and Stealth traffic with disposable
-keys and a debug-only test CA. The public test CA and key are not included in
-release Android builds. Physical-device, public-network and live Windows/macOS
-relay behavior are not established by these tests.
+keys and a debug-only test CA. The Windows and macOS CI checks exercise local
+WireGuard peer handshakes through TLS, not public egress or physical-network
+changes. The public test CA and key are not included in release Android builds.
+Physical-device and public-network behavior remain unverified.
