@@ -8,7 +8,7 @@ from typing import Callable
 from PySide6.QtCore import QObject, QRunnable, QSettings, QStandardPaths, QThreadPool, QTimer, Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QIcon
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
+    QApplication, QBoxLayout, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QMainWindow, QPlainTextEdit, QPushButton, QScrollArea, QStackedWidget,
     QVBoxLayout, QWidget,
 )
@@ -32,7 +32,8 @@ QPushButton:disabled { color: #666372; background: #1b1a24; border-color: #2b293
 QPushButton#primary { background: #6d4aff; color: white; border-color: #866dff; }
 QPushButton#primary:hover { background: #7b5cff; }
 QPushButton#primary:disabled { background: #393054; color: #817a94; border-color: #393054; }
-QPushButton#nav { border: 0; background: transparent; color: #9d9aaa; padding: 10px 5px; }
+QFrame#navigation { background: #12101d; }
+QPushButton#nav { border: 0; background: transparent; color: #bcbac8; padding: 10px 5px; }
 QPushButton#nav:checked { color: white; background: #6d4aff; }
 QComboBox, QLineEdit, QListWidget, QPlainTextEdit { background: #1b1a24; border: 1px solid #454257; border-radius: 7px; color: #f3f4f6; padding: 8px; }
 QComboBox:disabled, QLineEdit:disabled { color: #6b6875; }
@@ -97,7 +98,7 @@ class MainWindow(QMainWindow):
     def __init__(self, *, vpn=None, feed=None, session=None, directory=None, launch_url=None, settings=None, auto_refresh=True):
         super().__init__()
         self.setWindowTitle("OpenPath VPN")
-        self.resize(480, 800)
+        self.resize(1080, 760)
         self.setMinimumSize(360, 500)
         self.setStyleSheet(STYLE)
         self.settings = settings or QSettings()
@@ -145,8 +146,12 @@ class MainWindow(QMainWindow):
         head.addStretch()
         head.addWidget(label("WIREGUARD VPN", "subtitle"))
         outer.addWidget(header)
+        self.body = QBoxLayout(QBoxLayout.Direction.TopToBottom)
+        self.body.setContentsMargins(0, 0, 0, 0)
+        self.body.setSpacing(0)
+        outer.addLayout(self.body, 1)
         self.stack = QStackedWidget()
-        outer.addWidget(self.stack, 1)
+        self.body.addWidget(self.stack, 1)
         self._build_home()
         self._build_session()
         self._build_profiles()
@@ -154,22 +159,55 @@ class MainWindow(QMainWindow):
         self._build_settings()
         self._reset_targets()
         self.refresh_session()
-        navigation = QHBoxLayout()
-        navigation.setContentsMargins(8, 6, 8, 8)
+        self.navigation = QFrame()
+        self.navigation.setObjectName("navigation")
+        self.nav_layout = QBoxLayout(QBoxLayout.Direction.LeftToRight, self.navigation)
+        self.nav_layout.setContentsMargins(8, 8, 8, 8)
+        self.nav_layout.setSpacing(4)
         self.nav_buttons = []
         for index, text in enumerate(("Home", "Session", "Profiles", "Releases", "Settings")):
             nav = button(text, "nav")
             nav.setCheckable(True)
             nav.clicked.connect(lambda _checked=False, i=index: self.select_page(i))
-            navigation.addWidget(nav)
+            self.nav_layout.addWidget(nav)
             self.nav_buttons.append(nav)
-        outer.addLayout(navigation)
+        self.body.addWidget(self.navigation)
+        self._wide_layout = None
+        self._update_layout()
         self.select_page(0)
         self._sync_controls()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "navigation"):
+            self._update_layout()
+
+    def _update_layout(self):
+        wide = self.width() >= 760
+        if wide == self._wide_layout:
+            return
+        self._wide_layout = wide
+        self.body.removeWidget(self.navigation)
+        if wide:
+            self.body.setDirection(QBoxLayout.Direction.LeftToRight)
+            self.nav_layout.setDirection(QBoxLayout.Direction.TopToBottom)
+            self.nav_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+            self.navigation.setMinimumWidth(190)
+            self.navigation.setMaximumWidth(190)
+            self.body.insertWidget(0, self.navigation)
+        else:
+            self.body.setDirection(QBoxLayout.Direction.TopToBottom)
+            self.nav_layout.setDirection(QBoxLayout.Direction.LeftToRight)
+            self.nav_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+            self.navigation.setMinimumWidth(0)
+            self.navigation.setMaximumWidth(16777215)
+            self.body.addWidget(self.navigation)
 
     def _add_page(self, content):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
+        content.setMaximumWidth(1000)
         scroll.setWidget(content)
         self.stack.addWidget(scroll)
 

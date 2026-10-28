@@ -15,3 +15,9 @@ dist-installer/
 __pycache__/
 *.py[cod]
 .venv/
+
+# Android developer environment and signing keys
+client/android/.gradle/
+client/android/local.properties
+*.jks
+*.keystore

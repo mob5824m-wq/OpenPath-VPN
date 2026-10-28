@@ -1,6 +1,6 @@
 # Native desktop app
 
-This is the release desktop client for Linux, Windows and macOS. Its UI uses PySide6 **Qt Widgets**, not an embedded browser or webview. It has independent controls for the system WireGuard tunnel and the OpenPath WebSocket session. See the [root README](../../README.md#device-wide-wireguard-vpn) for OS prerequisites, profile format, DNS behavior and important security limitations.
+This is the release desktop client for Linux, Windows and macOS. Its UI uses PySide6 **Qt Widgets**, not an embedded browser or webview. It has independent controls for the system WireGuard tunnel and the OpenPath WebSocket session. The navigation moves from a desktop sidebar to a compact bottom bar when the window is narrow. See the [root README](../../README.md#device-wide-wireguard-vpn) for OS prerequisites, profile format, DNS behavior and important security limitations.
 
 ## Run and test
 

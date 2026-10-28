@@ -134,8 +134,14 @@ jobs:
     with:
       tag: ${{ needs.resolve.outputs.tag }}
 
+  android:
+    needs: resolve
+    uses: ./.github/workflows/android.yml
+    with:
+      tag: ${{ needs.resolve.outputs.tag }}
+
   publish:
-    needs: [resolve, bundles, native]
+    needs: [resolve, bundles, native, android]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -146,6 +152,10 @@ jobs:
         with:
           pattern: openpath-native-*
           merge-multiple: true
+          path: _release/artifacts
+      - uses: actions/download-artifact@v4
+        with:
+          name: openpath-android-test-apk
           path: _release/artifacts
       - name: Generate checksums
         shell: bash
@@ -165,9 +175,9 @@ jobs:
           body: |
             ## OpenPath ${{ needs.resolve.outputs.tag }}
 
-            Downloads include the server, web UI testing preview, and native Qt Widgets installers for Linux x64, Windows x64, and macOS Intel/Apple Silicon. The desktop apps do not embed a browser. Android and iOS installers are not currently published by this workflow. Desktop builds are unsigned and macOS builds are not notarized.
+            Downloads include the server, web UI testing preview, and native Qt Widgets installers for Linux x64, Windows x64, and macOS Intel/Apple Silicon. The desktop apps do not embed a browser. An Android APK is included for evaluation; it is non-debuggable but signed with a one-off test key and cannot be upgraded in place by a later build. Do not use it for production. iOS installers are not published. Desktop builds are unsigned and macOS builds are not notarized.
 
-            The device-wide WireGuard connection requires a separately configured WireGuard server, system tools and administrator permission. The WebSocket session is separate and does not route device traffic. See the repository documentation for DNS, routing and security limitations.
+            The device-wide WireGuard connection requires a separately configured WireGuard server and profile; desktop platforms also need system tools and administrator permission. Android requests system VPN permission and has no automatic reconnect. The separate WebSocket session does not route device traffic and is not implemented in the Android app. See the repository documentation for DNS, routing and security limitations.
 
             Verify downloads with `SHA256SUMS.txt`. Profiles saved in the app remain local to that device.
           files: _release/artifacts/*

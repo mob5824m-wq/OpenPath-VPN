@@ -894,8 +894,9 @@ export default function App(){
   /* ---------------- chrome ---------------- */
 
   const TopChrome = () => (
-    <div style={{ height:28, background:'#0a0a0f', display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 12px', borderBottom:'1px solid #1a1a24', flexShrink:0 }}>
+    <div className="app-chrome">
       <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+        <span className="app-brand">◈ OpenPath <small>UI preview</small></span>
         <button
           onClick={goBack}
           aria-label="Back"
@@ -1623,7 +1624,7 @@ export default function App(){
   /* ---------------- Bottom nav ---------------- */
 
   const BottomNav = () => (
-    <div style={{ position:'fixed', bottom:0, left:'50%', transform:'translateX(-50%)', width:'100%', maxWidth:440, height:58, background:'#12101d', borderTop:'1px solid #1f1f2a', display:'grid', gridTemplateColumns:'1fr 1fr 1fr 1fr', alignItems:'center', padding:'0 8px', zIndex:20 }}>
+    <nav className="app-nav" aria-label="Main navigation">
       {[
         { id:'home', label:'Home', icon:'⌂' },
         { id:'countries', label:'Countries', icon:'◍' },
@@ -1633,28 +1634,28 @@ export default function App(){
         const active = tab === it.id
         return (
           <button key={it.id} onClick={()=>setTab(it.id as Tab)} aria-label={it.label} aria-current={active ? 'page' : undefined}
-            style={{ background:'transparent', border:0, cursor:'pointer', display:'flex', flexDirection:'column', alignItems:'center', gap:2, color: active ? '#a78bfa' : '#6b7280' }}>
-            <span style={{ width:32, height:26, borderRadius:999, background: active ? '#6d4aff' : 'transparent', display:'grid', placeItems:'center', color: active ? '#fff' : '#6b7280', fontSize:14 }}>{it.icon}</span>
-            <span style={{ fontSize:10, fontWeight: active ? 700 : 500 }}>{it.label}</span>
+            className="app-nav-item">
+            <span className="app-nav-icon" aria-hidden="true">{it.icon}</span>
+            <span className="app-nav-label">{it.label}</span>
           </button>
         )
       })}
-    </div>
+    </nav>
   )
 
   /* ---------------- Root render ---------------- */
 
   return (
-    <div style={{ fontFamily:'Inter, system-ui, sans-serif', background:'#000', minHeight:'100vh', color:'#e5e7eb', display:'flex', flexDirection:'column', maxWidth:440, margin:'0 auto', borderLeft:'1px solid #1a1a24', borderRight:'1px solid #1a1a24', position:'relative' }}>
+    <div className="app-shell">
       <style>{`@keyframes pulse{0%{transform:scale(0.8);opacity:0.8}100%{transform:scale(1.6);opacity:0}} @keyframes slideUp{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}`}</style>
       {TopChrome()}
-      <div style={{ flex:1, overflow:'auto', WebkitOverflowScrolling:'touch' as any }}>
+      <main className="app-content">
         {tab === 'home' && HomeTab()}
         {tab === 'countries' && CountriesTab()}
         {tab === 'profiles' && ProfilesTab()}
         {tab === 'settings' && SettingsTab()}
         {tab === 'releases' && ReleasesTab()}
-      </div>
+      </main>
       {BottomNav()}
       {sheetProfile && ProfileSheet()}
       {editing && EditWizard()}

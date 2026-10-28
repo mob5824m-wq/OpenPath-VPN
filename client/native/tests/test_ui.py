@@ -128,6 +128,23 @@ class UITests(unittest.TestCase):
     def wait_for_device(self):
         self.wait_for(lambda: not self.window.device_busy and not self.window.status_busy)
 
+    def test_adaptive_navigation_keeps_controls_working(self):
+        w = self.window
+        w.resize(1100, 760)
+        self.app.processEvents()
+        self.assertTrue(w._wide_layout)
+        self.assertLess(w.navigation.geometry().right(), w.stack.geometry().left())
+        self.assertLess(w.nav_buttons[0].geometry().top(), w.nav_buttons[-1].geometry().top())
+        w.nav_buttons[4].click()
+        self.assertEqual(w.stack.currentIndex(), 4)
+        w.resize(400, 720)
+        self.app.processEvents()
+        self.assertFalse(w._wide_layout)
+        self.assertGreater(w.navigation.geometry().top(), w.stack.geometry().bottom())
+        self.assertLess(w.nav_buttons[0].geometry().left(), w.nav_buttons[-1].geometry().left())
+        w.nav_buttons[0].click()
+        self.assertEqual(w.stack.currentIndex(), 0)
+
     def test_real_controls_connect_disconnect_import_remove_and_errors(self):
         w = self.window
         self.assertEqual(w.status_label.text(), "Device VPN disconnected")

@@ -1,11 +1,11 @@
 # OpenPath VPN
 
-OpenPath provides a **native Qt Widgets desktop app** for Linux, Windows and macOS, a server, and a separate web UI preview. The desktop app is not a browser wrapper and does not embed a webview. The old Electron projects remain in the repository as legacy code; they are not used for the desktop releases.
+OpenPath provides a **native Qt Widgets desktop app** for Linux, Windows and macOS, a native Android app, a server, and a separate web UI preview. The desktop and Android apps are not browser wrappers and do not embed a webview. The old Electron projects remain in the repository as legacy code; they are not used for the desktop releases.
 
 There are two distinct connections:
 
-1. **Device-wide VPN:** the desktop app controls an operator-provided WireGuard UDP tunnel using the operating system's WireGuard tools. The OpenPath server does not create or operate that WireGuard server.
-2. **WebSocket session:** the desktop app and web preview can connect to an OpenPath server and send individual HTTP GET requests through it. This session does **not** route other apps or browser tabs. `wss://` uses TLS; `ws://` is unencrypted.
+1. **Device-wide VPN:** desktop apps control an operator-provided WireGuard UDP tunnel using system tools; Android uses the official WireGuard tunnel library and Android VPN service. The OpenPath server does not create or operate that WireGuard server.
+2. **WebSocket session:** the desktop app and web preview can connect to an OpenPath server and send individual HTTP GET requests through it. This session is not implemented in Android and does **not** route other apps or browser tabs. `wss://` uses TLS; `ws://` is unencrypted.
 
 > **Security:** The supplied demo PSK and unauthenticated provisioning/host-registration endpoints are not production-safe. Use the demo only on a trusted network; secure or disable these endpoints before exposing a server. The device VPN has no general kill switch, and an active interface alone does not prove a peer handshake or internet connectivity. Inspect routes and verify your setup independently before relying on it for privacy.
 
@@ -49,9 +49,15 @@ NetShield/DNS choices are **unfiltered** (the profile's DNS, or Cloudflare if om
 
 Linux/macOS use restricted temporary plaintext configuration files for `wg-quick` and normally remove them after each command; an abrupt process or system crash can leave them or network changes behind. The VPN is **not** automatically disconnected when the app closes. The app refuses to stop an interface whose ownership it cannot confirm, but its local ownership marker is not a security boundary. If start/stop is interrupted or ownership is ambiguous, inspect and clean up with the original WireGuard/system tools. Disconnecting does not require the profile keychain to remain unlocked. No peer-handshake verification, automatic kill switch, LAN exclusion guarantee, or guarantee of IPv6 connectivity is provided.
 
+## Native Android app
+
+The Android app imports an operator-supplied WireGuard profile, encrypts it with Android Keystore, requests Android VPN permission and offers DNS resolver choices. It uses native views with phone and tablet layouts; it does not implement the separate WebSocket session. Android can stop or revoke the VPN, and this app does not provide Always-on or automatic reconnection. See [Android instructions and limitations](client/android/README.md).
+
+CI builds a non-debuggable, **test-signed** APK for evaluation. Its signing key changes each build, so later builds cannot update it in place; uninstalling removes its stored profile. A production release needs a persistent, securely managed signing key. The app has not yet been verified against a real Android device and WireGuard server.
+
 ## Web UI preview and server
 
-The web UI is a **testing preview**, not the shipped desktop application. Requires Node.js 20 or newer. Start the server and preview in separate terminals:
+The web UI is a **testing preview**, not the shipped desktop application. It uses a sidebar at desktop widths and bottom navigation on phones. Requires Node.js 20 or newer. Start the server and preview in separate terminals:
 
 ```bash
 cd server && npm ci && npm run dev
@@ -64,7 +70,7 @@ The demo fetch supports GET/HEAD only, blocks private, loopback and reserved IPs
 
 ## Releases and packaging
 
-The **Native Installers** workflow builds Qt/PyInstaller applications and runs native control/backend tests and a packaged-app smoke test on each platform. It produces Linux x64 `.deb` and portable `.tar.gz`, Windows x64 NSIS `.exe` and `.zip`, and macOS Intel and Apple Silicon `.dmg` and `.zip`. The release workflow publishes those along with server/web-preview archives and SHA-256 checksums only after all jobs succeed, using the exact release tag. A manual Native Installers run without a tag creates CI artifacts without publishing. These builds are unsigned and macOS builds are not notarized; OS security prompts may appear. Android/iOS installers are not produced. Existing releases are not retroactively changed; a new release is needed for new installers.
+The **Native Installers** workflow builds Qt/PyInstaller applications and runs native control/backend tests and a packaged-app smoke test on each platform. It produces Linux x64 `.deb` and portable `.tar.gz`, Windows x64 NSIS `.exe` and `.zip`, and macOS Intel and Apple Silicon `.dmg` and `.zip`. The release workflow publishes those along with server/web-preview archives and SHA-256 checksums only after all jobs succeed, using the exact release tag. A manual Native Installers run without a tag creates CI artifacts without publishing. Desktop builds are unsigned and macOS builds are not notarized; OS security prompts may appear. The Android workflow produces an installable, non-debuggable APK signed with an ephemeral **test key**, not a production signing key. Future releases include that test APK and its checksum; it cannot be updated in place by later builds. iOS installers are not produced. Existing releases are not retroactively changed; a new release is needed for new installers.
 
 For a downloaded server archive, run `npm ci --omit=dev` then `npm start`. Set `WEB_DIST` to the extracted web-preview archive's `dist` directory to serve it and the API from one origin, or configure the reverse proxy described above. Verify downloaded files with `SHA256SUMS.txt`.
 
@@ -74,8 +80,9 @@ For a downloaded server archive, run `npm ci --omit=dev` then `npm start`. Set `
 PYTHONPATH=client/native python -m unittest discover -s client/native/tests -v
 (cd server && npm ci && npm test && npm run build)
 (cd client/web && npm ci && npm test && npm run typecheck && npm run build)
+(cd client/android && ./gradlew testDebugUnitTest assembleRelease)
 ```
 
-On headless Linux, Qt tests need the usual system Qt graphics libraries and `QT_QPA_PLATFORM=offscreen`. Tests of system commands are mocked; real device tunnels require OS privileges and an operator-controlled server. The repository also contains legacy Electron GUIs and experimental TUN, CLI and mobile scaffolding. They are not the native desktop release or a completed alternative WireGuard implementation. See [protocol specifications](protocol/SPEC.md) and [architecture notes](docs/ARCHITECTURE.md) as design documents, not security guarantees.
+On headless Linux, Qt tests need the usual system Qt graphics libraries and `QT_QPA_PLATFORM=offscreen`. Tests of system commands are mocked; real device tunnels require OS privileges and an operator-controlled server. The repository also contains legacy Electron GUIs and experimental TUN, CLI and iOS scaffolding. They are not the native desktop or Android release apps or a completed alternative WireGuard implementation. See [protocol specifications](protocol/SPEC.md) and [architecture notes](docs/ARCHITECTURE.md) as design documents, not security guarantees.
 
 MIT license. Use responsibly and comply with applicable policies and laws.
