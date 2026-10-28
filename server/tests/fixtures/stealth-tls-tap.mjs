@@ -10,8 +10,7 @@ if (!output) throw new Error('TEST_TAP_OUTPUT is required');
 const sessions = [];
 const limit = 4 * 1024 * 1024;
 
-function summary(session) {
-  const data = Buffer.concat(session.chunks);
+function records(data, helloType) {
   let offset = 0;
   let applicationData = false;
   let validRecords = true;
@@ -28,12 +27,21 @@ function summary(session) {
     offset += 5 + length;
   }
   return {
-    clientHello: data.length >= 6 && data[0] === 22 && data[1] === 3 && data[5] === 1,
+    hello: data.length >= 6 && data[0] === 22 && data[1] === 3 && data[5] === helloType,
     validRecords,
     applicationData,
-    plaintextHttp: data.includes(Buffer.from('GET /stealth-wg')) || data.includes(Buffer.from('user=ci-test')),
-    truncated: session.truncated,
-    bytes: session.bytes,
+  };
+}
+function summary(session) {
+  const outbound = Buffer.concat(session.outbound.chunks);
+  const inbound = Buffer.concat(session.inbound.chunks);
+  return {
+    client: records(outbound, 1),
+    server: records(inbound, 2),
+    plaintextHttp: outbound.includes(Buffer.from('GET /stealth-wg')) ||
+      outbound.includes(Buffer.from('user=ci-test')) || inbound.includes(Buffer.from('HTTP/1.1 101')) ||
+      inbound.includes(Buffer.from('"protocol":"wireguard-ws"')),
+    truncated: session.outbound.truncated || session.inbound.truncated,
   };
 }
 function flush() {
@@ -41,17 +49,20 @@ function flush() {
   writeFileSync(temp, JSON.stringify(sessions.map(summary)));
   renameSync(temp, output);
 }
+function capture(direction, chunk) {
+  direction.bytes += chunk.length;
+  if (direction.bytes <= limit) direction.chunks.push(chunk);
+  else direction.truncated = true;
+  flush();
+}
 
 const server = createServer(client => {
-  const session = {chunks: [], bytes: 0, truncated: false};
+  const stream = () => ({chunks: [], bytes: 0, truncated: false});
+  const session = {outbound: stream(), inbound: stream()};
   sessions.push(session);
   const upstream = createConnection({host: '127.0.0.1', port: targetPort});
-  client.on('data', chunk => {
-    session.bytes += chunk.length;
-    if (session.bytes <= limit) session.chunks.push(chunk);
-    else session.truncated = true;
-    flush();
-  });
+  client.on('data', chunk => capture(session.outbound, chunk));
+  upstream.on('data', chunk => capture(session.inbound, chunk));
   client.on('error', () => upstream.destroy());
   upstream.on('error', () => client.destroy());
   client.pipe(upstream).pipe(client);

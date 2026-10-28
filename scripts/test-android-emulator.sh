@@ -100,12 +100,13 @@ fi
 if ! node - "$TMP/tls-observation.json" <<'NODE'
 const fs = require('node:fs');
 const observations = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
-if (observations.length < 2 || observations.some(s => !s.clientHello || !s.validRecords ||
-    !s.applicationData || s.plaintextHttp || s.truncated)) {
+if (observations.length < 2 || observations.some(s => !s.client.hello || !s.server.hello ||
+    !s.client.validRecords || !s.server.validRecords || s.plaintextHttp || s.truncated) ||
+    !observations.some(s => s.client.applicationData && s.server.applicationData)) {
   console.error('Unexpected TCP observation:', JSON.stringify(observations));
   process.exit(1);
 }
-console.log('Android outer connections used TLS records; the HTTP upgrade was not visible in TCP bytes.');
+console.log('Android outer connections used TLS records in both directions; the HTTP upgrade was not visible in TCP bytes.');
 NODE
 then
   echo '::error::Android Stealth did not produce the expected TLS-only outer connection'

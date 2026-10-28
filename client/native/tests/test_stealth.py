@@ -36,9 +36,10 @@ class FakeBridge:
 
 
 class TcpTap:
-    """Forward one test TCP connection and record the client-side wire bytes."""
+    """Forward one test TCP connection and record both directions on the wire."""
     def __init__(self, target_port):
-        self.data = bytearray()
+        self.client_data = bytearray()
+        self.server_data = bytearray()
         self.stop = threading.Event()
         self.listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.listener.bind(('127.0.0.1', 0))
@@ -61,8 +62,7 @@ class TcpTap:
                         data = source.recv(65536)
                         if not data:
                             return
-                        if source is client:
-                            self.data.extend(data)
+                        (self.client_data if source is client else self.server_data).extend(data)
                         (upstream if source is client else client).sendall(data)
         except OSError:
             # The assertions inspect the captured stream; socket closure during
@@ -78,7 +78,7 @@ class TcpTap:
         self.listener.close()
         if self.thread.is_alive():
             raise AssertionError('TCP capture did not stop')
-        return bytes(self.data)
+        return bytes(self.client_data), bytes(self.server_data)
 
 
 class StealthTests(unittest.TestCase):
@@ -98,9 +98,13 @@ class StealthTests(unittest.TestCase):
 
     def test_relay_context_requires_modern_verified_tls(self):
         context = _relay_tls_context()
-        self.assertEqual(context.minimum_version, ssl.TLSVersion.TLSv1_2)
+        self.assertGreaterEqual(context.minimum_version, ssl.TLSVersion.TLSv1_2)
         self.assertEqual(context.verify_mode, ssl.CERT_REQUIRED)
         self.assertTrue(context.check_hostname)
+        strict = ssl.create_default_context()
+        strict.minimum_version = ssl.TLSVersion.TLSv1_3
+        with patch('openpath.stealth.ssl.create_default_context', return_value=strict):
+            self.assertEqual(_relay_tls_context().minimum_version, ssl.TLSVersion.TLSv1_3)
 
     def test_platform_socket_pins(self):
         class MockSocket:
@@ -228,28 +232,30 @@ class StealthTests(unittest.TestCase):
                         finally:
                             bridge.stop()
                 finally:
-                    captured = tap.finish()
+                    outbound, inbound = tap.finish()
                 self.assertTrue(negotiated and negotiated[0] in ('TLSv1.2', 'TLSv1.3'))
-                self.assertGreaterEqual(len(captured), 6)
-                self.assertEqual(captured[0], 22)  # TLS handshake record
-                self.assertEqual(captured[1], 3)
-                self.assertEqual(captured[5], 1)   # ClientHello
-                self.assertNotIn(packet, captured)
-                self.assertNotIn(b'GET /stealth-wg', captured)
-                # Every complete outer record is TLS; at least one encrypted
-                # application-data record carries the HTTP upgrade / VPN frames.
-                offset, types = 0, []
-                while offset + 5 <= len(captured):
-                    kind, major = captured[offset], captured[offset + 1]
-                    size = int.from_bytes(captured[offset + 3:offset + 5], 'big')
-                    self.assertIn(kind, (20, 21, 22, 23))
-                    self.assertEqual(major, 3)
-                    self.assertLessEqual(size, 18432)
-                    if offset + 5 + size > len(captured):
-                        break  # An interrupted close may leave a partial last record.
-                    types.append(kind)
-                    offset += 5 + size
-                self.assertIn(23, types)
+                for captured, hello_type in ((outbound, 1), (inbound, 2)):
+                    self.assertGreaterEqual(len(captured), 6)
+                    self.assertEqual(captured[0], 22)  # TLS handshake record
+                    self.assertEqual(captured[1], 3)
+                    self.assertEqual(captured[5], hello_type)  # ClientHello / ServerHello
+                    self.assertNotIn(packet, captured)
+                    # Every complete outer record is TLS; at least one encrypted
+                    # application-data record carries the upgrade / VPN frames.
+                    offset, types = 0, []
+                    while offset + 5 <= len(captured):
+                        kind, major = captured[offset], captured[offset + 1]
+                        size = int.from_bytes(captured[offset + 3:offset + 5], 'big')
+                        self.assertIn(kind, (20, 21, 22, 23))
+                        self.assertEqual(major, 3)
+                        self.assertLessEqual(size, 18432)
+                        if offset + 5 + size > len(captured):
+                            break  # An interrupted close may leave a partial last record.
+                        types.append(kind)
+                        offset += 5 + size
+                    self.assertIn(23, types)
+                self.assertNotIn(b'GET /stealth-wg', outbound)
+                self.assertNotIn(b'HTTP/1.1 101', inbound)
 
                 # A trusted CA must not make a certificate for a different host valid.
                 fake_dns = [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, '', ('127.0.0.1', port))]

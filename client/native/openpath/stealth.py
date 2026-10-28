@@ -36,7 +36,9 @@ def stealth_url(server: str, username: str, psk: str) -> str:
 def _relay_tls_context() -> ssl.SSLContext:
     """Use system trust and hostname checks, with TLS 1.2 as the minimum."""
     context = ssl.create_default_context()
-    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    # Preserve a stricter administrator/system policy, if one is configured.
+    if context.minimum_version < ssl.TLSVersion.TLSv1_2:
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
     return context
 
 
