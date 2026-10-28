@@ -9,7 +9,7 @@ const readWorkflow = (name:string) => parse(readFileSync(new URL(`../../.github/
 // checks parse the actual workflows rather than inferring behavior from docs.
 test('macOS ARM build and real Stealth handshake share one native runner', () => {
   const native = readWorkflow('native-installers.yml');
-  assert.deepEqual(native.on.push.branches, ['arena/**']);
+  assert.equal(native.on.push, undefined, 'native builds must not duplicate PR and tagged-release builds');
   assert.ok(Object.hasOwn(native.on, 'pull_request'));
   assert.equal(native.on.workflow_call.inputs.tag.required, true);
   assert.equal(native.on.workflow_dispatch.inputs.tag.required, false);

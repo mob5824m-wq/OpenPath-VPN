@@ -1,10 +1,8 @@
 name: Native Installers
 
 on:
-  # Main's tagged release calls this workflow for the same commit. Avoid a
-  # second unversioned build competing for scarce macOS ARM runners.
-  push:
-    branches: ["arena/**"]
+  # PRs validate changes and main's tagged release calls this workflow. Avoid
+  # duplicate branch-push builds competing for scarce macOS ARM runners.
   pull_request:
   workflow_dispatch:
     inputs:
