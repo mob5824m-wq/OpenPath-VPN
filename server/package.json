@@ -1,6 +1,6 @@
 {
   "name": "openpath-server",
-  "version": "1.0",
+  "version": "1.1",
   "description": "OpenPath Stealth VPN Server — DPI-resistant, domain-fronted VPN over 443",
   "type": "module",
   "main": "src/index.ts",
