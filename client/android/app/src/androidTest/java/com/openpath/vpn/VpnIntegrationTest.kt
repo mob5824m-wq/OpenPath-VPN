@@ -41,6 +41,16 @@ class VpnIntegrationTest {
         try {
             assertNull("Emulator VPN consent was not granted", VpnService.prepare(context))
             assertTrue(manager.configured)
+            // Neither cleartext WebSocket nor an untrusted TLS relay may start
+            // the tunnel or silently fall back to direct WireGuard.
+            assertTrue(manager.connect("profile", "", "stealth", "ws://10.0.2.2:18443", "ci-test", "only-for-disposable-ci-tests-not-production-123"))
+            waitForOperation(manager)
+            assertFalse("Stealth must reject ws://", manager.active)
+            assertTrue(manager.message, manager.message.contains("wss://"))
+            assertTrue(manager.connect("profile", "", "stealth", "wss://10.0.2.2:18445", "ci-test", "only-for-disposable-ci-tests-not-production-123"))
+            waitForOperation(manager)
+            assertFalse("Stealth must reject an untrusted TLS certificate", manager.active)
+            assertTrue(manager.message, manager.message.contains("TLS relay"))
             // Invalid relay credentials must not start direct WireGuard as a fallback.
             assertTrue(manager.connect("profile", "", "stealth", "wss://10.0.2.2:18443", "ci-test", "wrong"))
             waitForOperation(manager)

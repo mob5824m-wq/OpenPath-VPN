@@ -33,6 +33,13 @@ def stealth_url(server: str, username: str, psk: str) -> str:
     return session_url(base, username, psk)
 
 
+def _relay_tls_context() -> ssl.SSLContext:
+    """Use system trust and hostname checks, with TLS 1.2 as the minimum."""
+    context = ssl.create_default_context()
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    return context
+
+
 def is_wireguard(data: bytes) -> bool:
     if len(data) < 4 or len(data) > MAX_PACKET or data[1:4] != b'\0\0\0':
         return False
@@ -117,7 +124,7 @@ class StealthBridge:
                 outer.settimeout(8)
                 outer.connect((address, parsed.port or 443))
                 from websockets.sync.client import connect
-                ws = connect(url, sock=outer, ssl=ssl.create_default_context(), server_hostname=parsed.hostname,
+                ws = connect(url, sock=outer, ssl=_relay_tls_context(), server_hostname=parsed.hostname,
                              open_timeout=8, close_timeout=1, compression=None, max_size=MAX_PACKET, max_queue=32,
                              ping_interval=10, ping_timeout=10, proxy=None)
             except Exception:

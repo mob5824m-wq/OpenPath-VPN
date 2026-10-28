@@ -1,17 +1,36 @@
 # Device-wide Stealth VPN: operator setup
 
 Stealth is an **opt-in WireGuard transport**, not the separate `/ops` WebSocket
-fetch session. It carries encrypted WireGuard datagrams inside an authenticated
-TLS WebSocket to one fixed UDP target. The WireGuard server, peer keys, IP
-forwarding, NAT, DNS and IPv4/IPv6 reachability must already work. OpenPath does
-not create or provision the WireGuard server. Direct WireGuard remains available.
-TLS-over-TCP can be slower or less reliable than UDP. It may be identifiable or
-blocked; no censorship-resistance or privacy guarantee is made.
+fetch session. It encapsulates WireGuard datagrams in binary WebSocket frames
+inside an authenticated TLS connection over TCP. The HTTPS WebSocket upgrade
+and frames are encrypted in transit between the app and the TLS reverse proxy,
+typically on TCP port 443. Both apps require a trusted certificate for the
+configured hostname and at least TLS 1.2 (Android offers TLS 1.2 and 1.3);
+there is no plaintext fallback.
+
+```text
+device traffic → WireGuard encryption → local loopback UDP bridge
+    → WebSocket inside TLS over TCP (normally 443) → HTTPS reverse proxy
+    → OpenPath relay → encrypted WireGuard over UDP → WireGuard server
+```
+
+TLS terminates at the reverse proxy, not at the WireGuard server. The relay's
+UDP hop is protected by WireGuard encryption, not TLS. The WireGuard server,
+peer keys, IP forwarding, NAT, DNS and IPv4/IPv6 reachability must already work;
+OpenPath does not create or provision the server. Direct WireGuard remains available.
+
+The outer connection uses the same TLS and TCP mechanisms as HTTPS, but it is a
+long-lived WebSocket, not ordinary page browsing. IP address, port, TLS metadata
+(such as a hostname when exposed), connection duration and traffic patterns may
+remain observable. It can be fingerprinted or blocked and is not guaranteed to
+be indistinguishable from HTTPS or to bypass restrictions. TCP encapsulation can
+also perform poorly for TCP applications due to loss and retransmission interactions.
 
 ## Deploy the relay safely
 
 1. Use a real domain with a valid, client-trusted TLS certificate and a TLS
-   reverse proxy supporting WebSocket upgrades. **Clients require `wss://` and
+   reverse proxy supporting WebSocket upgrades and TLS 1.2 or newer. Expose it
+   on TCP port 443 for the usual HTTPS port. **Clients require `wss://` and
    verify the certificate and hostname.** There is no plaintext fallback.
 2. Run the OpenPath server on the same host as the proxy, bound to loopback, and
    point the relay at a fixed **numeric IP and UDP port** for your WireGuard
@@ -76,7 +95,7 @@ the WireGuard server. Users cannot select arbitrary relay targets.
 ## Connect the apps
 
 - **Desktop:** import the WireGuard profile, enter the WSS server, relay user and
-  PSK in **Settings**, then choose **Stealth WireGuard over TLS relay** on Home.
+  PSK in **Settings**, then choose **Stealth WireGuard over TLS/TCP** on Home.
   The PSK is memory-only. Keep the app open and disconnect before closing it.
   The TLS socket is pinned to the pre-VPN egress interface; only IPv4 relay
   egress is currently supported on desktop. A lost network or failed relay is
@@ -108,7 +127,10 @@ behavior. The native workflow's isolated Linux namespace test exercises a real
 kernel WireGuard handshake and traffic over TLS, plus relay failure without
 direct fallback; it does not exercise actual DNS/firewall configuration. The
 Android emulator workflow exercises direct and Stealth traffic with disposable
-keys and a debug-only test CA. The Windows and macOS CI checks exercise local
+keys and a debug-only test CA; it also rejects an untrusted certificate and
+inspects the outer TCP stream for TLS records rather than a plaintext upgrade.
+Native tests check TLS records, certificate trust and hostname verification.
+The Windows and macOS CI checks exercise local
 WireGuard peer handshakes through TLS, not public egress or physical-network
 changes. The public test CA and key are not included in release Android builds.
 Physical-device and public-network behavior remain unverified.

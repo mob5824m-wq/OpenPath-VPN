@@ -205,7 +205,7 @@ class MainActivity : Activity() {
             addView(text("An active interface does not prove a peer handshake or internet access.", 12f, muted))
             addView(spacing(10))
             addView(text("Device VPN transport", 13f, muted))
-            val choices = arrayOf("Direct WireGuard (UDP)", "Stealth WireGuard over TLS relay")
+            val choices = arrayOf("Direct WireGuard (UDP)", "Stealth WireGuard over TLS/TCP")
             val spinner = Spinner(this@MainActivity).apply {
                 adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, choices)
                 setSelection(if (transport == "stealth") 1 else 0)
@@ -229,7 +229,7 @@ class MainActivity : Activity() {
             addAction("Change DNS settings", !manager.working) { page = 2; render() }
         }
         addCard("About this connection") {
-            addView(text("Direct uses WireGuard over UDP. Stealth carries WireGuard through the authenticated TLS relay configured in Settings. It needs an operator-provided relay and does not guarantee bypassing restrictions.", 13f, muted))
+            addView(text("Direct uses WireGuard over UDP. Stealth wraps WireGuard in an HTTPS WebSocket over TLS/TCP through the relay in Settings. It needs an operator-provided relay and does not guarantee bypassing restrictions.", 13f, muted))
         }
     }
 

@@ -5,10 +5,13 @@ import android.content.Intent
 import android.net.VpnService
 import android.os.Build
 import com.wireguard.android.backend.GoBackend
+import okhttp3.ConnectionSpec
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
+import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.Response
+import okhttp3.TlsVersion
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.ByteString
@@ -81,6 +84,11 @@ internal class ProtectedSocketFactory(private val service: VpnService) : SocketF
 internal object StealthProtocol {
     const val MAX_PACKET = 2048
     private const val PATH = "/stealth-wg"
+    // HTTPS WebSocket upgrades travel over TLS on a TCP socket. There is no
+    // cleartext or legacy-TLS connection spec to fall back to.
+    val TLS_SPEC: ConnectionSpec = ConnectionSpec.Builder(ConnectionSpec.MODERN_TLS)
+        .tlsVersions(TlsVersion.TLS_1_3, TlsVersion.TLS_1_2).build()
+    val HTTP_PROTOCOLS = listOf(Protocol.HTTP_1_1)
 
     fun signedUrl(server: String, username: String, psk: String): String {
         val uri = try { URI(server.trim()) } catch (_: Exception) { throw IllegalArgumentException("Enter a valid wss:// relay address.") }
@@ -126,6 +134,7 @@ internal class StealthBridge(
     private val ready = CountDownLatch(1)
     private val udp = DatagramSocket(InetSocketAddress(InetAddress.getByName("127.0.0.1"), 0)).apply { soTimeout = 1000 }
     private val client = OkHttpClient.Builder().socketFactory(ProtectedSocketFactory(service))
+        .connectionSpecs(listOf(StealthProtocol.TLS_SPEC)).protocols(StealthProtocol.HTTP_PROTOCOLS)
         .followRedirects(false).followSslRedirects(false).pingInterval(20, TimeUnit.SECONDS)
         .connectTimeout(8, TimeUnit.SECONDS).readTimeout(0, TimeUnit.SECONDS).build()
     @Volatile private var socket: WebSocket? = null

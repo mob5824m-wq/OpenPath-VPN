@@ -4,7 +4,7 @@ OpenPath provides a **native Qt Widgets desktop app** for Linux, Windows and mac
 
 There are two distinct connections:
 
-1. **Device-wide VPN:** desktop apps control an operator-provided WireGuard tunnel using system tools; Android uses the official WireGuard library and Android VPN service. Choose direct UDP or opt-in Stealth (WireGuard carried through a configured TLS/WebSocket relay). The relay does not create or operate the WireGuard server.
+1. **Device-wide VPN:** desktop apps control an operator-provided WireGuard tunnel using system tools; Android uses the official WireGuard library and Android VPN service. Choose direct UDP or opt-in Stealth (WireGuard encapsulated in an HTTPS WebSocket over TLS/TCP to a configured relay). The relay does not create or operate the WireGuard server, and Stealth is not guaranteed to be indistinguishable from HTTPS or bypass restrictions.
 2. **WebSocket session:** the desktop app and web preview can connect to an OpenPath server and send individual HTTP GET requests through it. This session is not implemented in Android and does **not** route other apps or browser tabs. `wss://` uses TLS; `ws://` is unencrypted.
 
 > **Security:** The supplied demo PSK and unauthenticated provisioning/host-registration endpoints are not production-safe. Use the demo only on a trusted network; secure or disable these endpoints before exposing a server. The device VPN has no general kill switch, and an active interface alone does not prove a peer handshake or internet connectivity. Inspect routes and verify your setup independently before relying on it for privacy.

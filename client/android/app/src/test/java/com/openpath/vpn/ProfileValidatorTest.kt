@@ -58,6 +58,9 @@ class ProfileValidatorTest {
     }
 
     @Test fun stealthRequiresTlsAndSignsTheExactRelayPath() {
+        assertTrue(StealthProtocol.TLS_SPEC.isTls)
+        assertEquals(listOf(okhttp3.TlsVersion.TLS_1_3, okhttp3.TlsVersion.TLS_1_2), StealthProtocol.TLS_SPEC.tlsVersions)
+        assertEquals(listOf(okhttp3.Protocol.HTTP_1_1), StealthProtocol.HTTP_PROTOCOLS)
         val url = java.net.URI(StealthProtocol.signedUrl("wss://relay.example/ops", "test-user", "test-secret"))
         assertEquals("https", url.scheme)
         assertEquals("/stealth-wg", url.path)
