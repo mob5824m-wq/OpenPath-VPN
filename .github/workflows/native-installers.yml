@@ -59,9 +59,19 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: |
           set -euo pipefail
-          python3 client/native/make_icons.py
-          python3 -m PyInstaller --noconfirm --clean --distpath client/native/dist --workpath client/native/build/pyinstaller client/native/OpenPath.spec
-          client/native/dist/OpenPath/OpenPath --smoke-test
+          run_checked() {
+            set +e
+            "$@" 2>&1 | tee /tmp/openpath-build.log
+            status=${PIPESTATUS[0]}
+            set -e
+            if [ "$status" -ne 0 ]; then
+              echo "::error::Native build command failed: $(tail -n 15 /tmp/openpath-build.log | tr '\n\r' '  ')"
+              exit "$status"
+            fi
+          }
+          run_checked python3 client/native/make_icons.py
+          run_checked python3 -m PyInstaller --noconfirm --clean --distpath client/native/dist --workpath client/native/build/pyinstaller client/native/OpenPath.spec
+          run_checked client/native/dist/OpenPath/OpenPath --smoke-test
       - name: Package deb and portable archive
         env:
           TAG: ${{ steps.version.outputs.tag }}
@@ -94,8 +104,14 @@ jobs:
         run: |
           $env:PYTHONPATH = "$pwd\client\native"
           $env:QT_QPA_PLATFORM = 'offscreen'
-          python -m unittest discover -s client/native/tests -v
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $ErrorActionPreference = 'Continue'
+          python -m unittest discover -s client/native/tests -v 2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP\openpath-tests.log"
+          $code = $LASTEXITCODE
+          if ($code -ne 0) {
+            $tail = (Get-Content "$env:RUNNER_TEMP\openpath-tests.log" -Tail 30) -join ' '
+            Write-Output "::error::Native tests failed: $tail"
+            exit $code
+          }
       - id: version
         shell: bash
         env:
