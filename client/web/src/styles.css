@@ -59,3 +59,13 @@ a{color:inherit}
   .app-nav-label{font-size:13px}
   .app-nav-item[aria-current=page]{background:#28203f;color:#fff}
 }
+.home-layout{display:grid;gap:0;background:#000;min-height:100%}
+@media(min-width:1100px){
+  .home-layout{grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-areas:"summary map" "summary feedback" "details details";gap:12px;padding:20px;align-content:start}
+  .home-summary{grid-area:summary;border:1px solid #2a2a38;border-radius:14px;padding:24px!important;align-self:stretch}
+  .home-map{grid-area:map;border:1px solid #252334;border-radius:14px 14px 0 0}
+  .home-feedback{grid-area:feedback;border:1px solid #252334!important;border-radius:0 0 14px 14px;margin-top:-12px}
+  .home-details{grid-area:details;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding:0 0 30px!important;align-items:start}
+  .home-details>*{margin-top:0!important}
+  .home-details>*:last-child{grid-column:1/-1}
+}

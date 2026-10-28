@@ -49,12 +49,31 @@ jobs:
             # Logs may be unavailable to API consumers. Put useful compiler,
             # dependency and test failures in check annotations too.
             python3 - "$RUNNER_TEMP/openpath-android.log" <<'PY'
-          import pathlib, re, sys
+          import glob, pathlib, re, sys, xml.etree.ElementTree as ET
           text = pathlib.Path(sys.argv[1]).read_text(errors='replace').splitlines()
-          interesting = [line.strip() for line in text if re.search(r'(^e: | error:|FAILED|FAILURE:|What went wrong:|Could not|Caused by:|Exception|expected:|> Task )', line)]
-          for line in interesting[-35:]:
+          interesting = []
+          for name in glob.glob('app/build/test-results/**/TEST-*.xml', recursive=True):
+              try:
+                  for case in ET.parse(name).iter('testcase'):
+                      for failure in case.findall('failure'):
+                          interesting.append(f"{case.get('classname')}.{case.get('name')}: {failure.get('message', '')}")
+              except (ET.ParseError, OSError):
+                  pass
+          # GitHub accepts only ten error annotations per step. Prioritize the
+          # compiler/test error and the concise Gradle cause, not task progress.
+          interesting += [line.strip() for line in text if re.search(r'(^e: | error:| FAILED$)', line)]
+          for i, line in enumerate(text):
+              if 'What went wrong:' in line:
+                  interesting += [item.strip() for item in text[i + 1:i + 6] if item.strip() and not item.startswith('* Try:')]
+                  break
+          interesting += [line.strip() for line in text if re.search(r'(FAILURE:|Could not|Caused by:)', line)]
+          seen = set()
+          for line in interesting:
+              if line in seen: continue
+              seen.add(line)
               line = line.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')[:1500]
               print(f'::error title=Android build::{line}')
+              if len(seen) >= 10: break
           PY
             exit "$status"
           fi

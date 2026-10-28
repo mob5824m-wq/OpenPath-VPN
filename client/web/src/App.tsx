@@ -919,7 +919,7 @@ export default function App(){
     const exitCountry = activeServer?.country ? COUNTRY_COORDS[activeServer.country] : undefined
     const exit = exitCountry ? projectPoint(exitCountry.lat, exitCountry.lon) : null
     return (
-      <div style={{ position:'relative', height:220, overflow:'hidden', background:'#08080c' }}>
+      <div className="home-map" style={{ position:'relative', height:220, overflow:'hidden', background:'#08080c' }}>
         <svg viewBox="0 0 1000 500" style={{ width:'100%', height:'100%', opacity: highlighted ? 1 : 0.55 }}>
           <path d="M 40 80 L 90 60 L 140 80 L 180 120 L 220 140 L 260 130 L 240 180 L 200 210 L 160 200 L 120 160 L 60 140 Z" fill="#3a3850" stroke="#4a4860" strokeWidth="1"/>
           <path d="M 60 220 L 90 200 L 130 210 L 150 250 L 110 280 L 60 260 Z" fill="#3a3850" stroke="#4a4860" strokeWidth="1"/>
@@ -964,8 +964,8 @@ export default function App(){
   /* ---------------- Home ---------------- */
 
   const HomeTab = () => (
-    <div style={{ display:'grid', gap:0, background:'#000', minHeight:'100%' }}>
-      <div style={{
+    <div className="home-layout">
+      <div className="home-summary" style={{
         background: connected ? 'linear-gradient(180deg, #0e6b52 0%, #0a3a2e 60%, #0a0a0f 100%)' : 'linear-gradient(180deg, #1a1a24 0%, #0a0a0f 100%)',
         padding:'14px 16px 10px', textAlign:'center', borderBottom:'1px solid #1a1a24',
       }}>
@@ -1019,7 +1019,7 @@ export default function App(){
 
       {WorldMap({ highlighted: connected })}
 
-      <div style={{ background:'#0a0a0f', padding:'10px 16px', display:'flex', alignItems:'center', justifyContent:'space-between', borderTop:'1px solid #1a1a24', borderBottom:'1px solid #1a1a24' }}>
+      <div className="home-feedback" style={{ background:'#0a0a0f', padding:'10px 16px', display:'flex', alignItems:'center', justifyContent:'space-between', borderTop:'1px solid #1a1a24', borderBottom:'1px solid #1a1a24' }}>
         <span style={{ color:'#e5e7eb', fontSize:12 }}>{feedback ? 'Thanks for the feedback' : 'How is your connection?'}</span>
         <div style={{ display:'flex', gap:12, alignItems:'center' }}>
           <button onClick={()=>giveFeedback('down')} aria-label="Bad connection" aria-pressed={feedback==='down'}
@@ -1030,7 +1030,7 @@ export default function App(){
         </div>
       </div>
 
-      <div style={{ padding:12, background:'#000', paddingBottom:80 }}>
+      <div className="home-details" style={{ padding:12, background:'#000', paddingBottom:80 }}>
         {connected ? (
           <div style={{ background:'#1c1b26', border:'1px solid #2a2a38', borderRadius:16, padding:14 }}>
             <button
