@@ -566,7 +566,7 @@ class MainWindow(QMainWindow):
 
     def _sync_controls(self):
         status = self.current_status or {}
-        inactive = status.get("state") == "inactive"
+        inactive = status.get("state") in ("inactive", "unverified")
         active_or_stopped = status.get("state") in ("active", "stopped")
         self.import_button.setEnabled(not self.device_busy and inactive)
         self.profile_import.setEnabled(not self.device_busy and inactive)
@@ -607,7 +607,7 @@ class MainWindow(QMainWindow):
         self.current_status = state
         names = {"active": "WireGuard interface active", "inactive": "Device VPN disconnected",
                  "stopped": "WireGuard service stopped", "unsupported": "Device VPN unsupported on this system",
-                 "unknown": "Device VPN status unavailable"}
+                 "unknown": "Device VPN status unavailable", "unverified": "Device VPN status unverified"}
         status_text = names.get(state.get("state"), "Device VPN status unavailable")
         self.status_label.setText(status_text)
         self.settings_status.setText(status_text)

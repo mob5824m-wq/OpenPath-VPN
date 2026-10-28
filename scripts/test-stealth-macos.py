@@ -4,6 +4,7 @@ Runs only on an isolated CI VM with passwordless sudo. It does not validate
 public egress or scoped routing on every physical network.
 """
 import os
+import json
 from pathlib import Path
 import shutil
 import subprocess
@@ -12,6 +13,7 @@ import threading
 import time
 
 from openpath.stealth import StealthBridge
+from openpath.wireguard import DeviceVPN
 
 ROOT = Path(__file__).resolve().parents[1]
 WG = shutil.which('wg')
@@ -79,7 +81,13 @@ PersistentKeepalive = 2
 ''', encoding='ascii')
         sudo(QUICK, 'up', str(client_config))
         client_up = True
-        actual_name = Path('/var/run/wireguard/opvpn0.name').read_text().strip()
+        actual_name = sudo('/bin/cat', '/var/run/wireguard/opvpn0.name')
+        # On CI, wireguard-go's runtime directory is root-only. Verify the
+        # ordinary unprivileged app can use its recorded utun identity.
+        vpn = DeviceVPN(root, platform='darwin')
+        vpn.directory.mkdir(parents=True, exist_ok=True)
+        vpn.marker.write_text(json.dumps({'identity': f'utun:{actual_name}'}))
+        assert vpn.runtime_status()['state'] == 'active', vpn.runtime_status()
         deadline = time.monotonic() + 45
         handshake = '0'
         while time.monotonic() < deadline:
@@ -99,6 +107,9 @@ PersistentKeepalive = 2
         assert bridge.status() == 'failed'
         assert '127.0.0.1:' in sudo(WG, 'show', actual_name, 'endpoints')
         print('Relay failure reported separately; endpoint did not fall back to direct UDP.', flush=True)
+        sudo(QUICK, 'down', str(client_config))
+        client_up = False
+        assert vpn.runtime_status()['state'] in ('inactive', 'unverified'), vpn.runtime_status()
     finally:
         if client_up:
             try: sudo(QUICK, 'down', str(client_config))

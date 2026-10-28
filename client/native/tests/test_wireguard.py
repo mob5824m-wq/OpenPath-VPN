@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from openpath.wireguard import DeviceVPN, apple_script_command, parse_config, render_config
 
@@ -205,6 +206,73 @@ class WireGuardTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "did not report an active"):
                 vpn.connect()
             self.assertFalse(vpn.status()["owned"])
+
+    def test_macos_root_only_runtime_directory_uses_elevated_interface_record(self):
+        with tempfile.TemporaryDirectory() as root:
+            source = Path(root) / "source.conf"
+            source.write_text(SAMPLE)
+            wg_dir = Path(root) / "root-only-wireguard"
+            wg_dir.mkdir()
+            active = False
+            original_read = Path.read_text
+            def restricted(path, *args, **kwargs):
+                if path == wg_dir / "opvpn0.name":
+                    raise PermissionError("root-only runtime directory")
+                return original_read(path, *args, **kwargs)
+            def run(args, **_):
+                nonlocal active
+                if args[0] == "/sbin/ifconfig":
+                    if active and args[-1] == "utun44": return "utun44: flags"
+                    raise RuntimeError("interface does not exist")
+                if args[0] == "/usr/bin/osascript":
+                    if "wg-quick up" in args[-1]:
+                        active = True
+                        return "OPENPATH_UTUN=utun44\n"
+                    active = False
+                    return ""
+                raise AssertionError(args)
+            vpn = DeviceVPN(root, platform="darwin", keychain=FakeKeychain(), find=lambda c:c[0], run=run,
+                            wireguard_dir=wg_dir)
+            with patch.object(Path, "read_text", restricted):
+                self.assertEqual(vpn.status()["state"], "unverified")
+                vpn.import_file(source)
+                status = vpn.connect()
+                self.assertEqual(status["state"], "active")
+                self.assertTrue(status["owned"])
+                self.assertEqual(status["identity"], "utun:utun44")
+                result = vpn.disconnect()
+                self.assertEqual(result["state"], "unverified")
+                self.assertFalse(vpn.marker.exists())
+                self.assertFalse(active)
+
+    def test_macos_unconfirmed_start_attempts_rollback(self):
+        with tempfile.TemporaryDirectory() as root:
+            source = Path(root) / "source.conf"
+            source.write_text(SAMPLE)
+            wg_dir = Path(root) / "root-only-wireguard"
+            wg_dir.mkdir()
+            active = False
+            calls = []
+            original_read = Path.read_text
+            def restricted(path, *args, **kwargs):
+                if path == wg_dir / "opvpn0.name": raise PermissionError("root-only")
+                return original_read(path, *args, **kwargs)
+            def run(args, **_):
+                nonlocal active
+                if args[0] == "/usr/bin/osascript":
+                    if "wg-quick up" in args[-1]:
+                        active = True; calls.append("up"); return "no interface name"
+                    active = False; calls.append("down"); return ""
+                raise AssertionError(args)
+            vpn = DeviceVPN(root, platform="darwin", keychain=FakeKeychain(), find=lambda c:c[0], run=run,
+                            wireguard_dir=wg_dir)
+            with patch.object(Path, "read_text", restricted):
+                vpn.import_file(source)
+                with self.assertRaisesRegex(RuntimeError, "was stopped"):
+                    vpn.connect()
+                self.assertEqual(calls, ["up", "down"])
+                self.assertFalse(active)
+                self.assertFalse(vpn.marker.exists())
 
     def test_macos_uses_quoted_elevated_command_and_tracks_interface(self):
         command = apple_script_command('/opt/homebrew/bin/wg-quick', 'up', "/Users/O'Brien/opvpn0.conf")

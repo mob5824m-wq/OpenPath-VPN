@@ -271,7 +271,20 @@ def find_tool(candidates: list[str]) -> str | None:
 def apple_script_command(tool: str, action: str, config_path: str) -> str:
     search = ":".join((os.path.dirname(tool), "/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"))
     command = " ".join(shlex.quote(value) for value in ("/usr/bin/env", f"PATH={search}", tool, action, config_path))
+    if action == "up":
+        # wireguard-go's /var/run/wireguard directory can be root-only. Return
+        # the interface name while already elevated, so status never needs a
+        # recurring privilege prompt. Roll back if the name cannot be read.
+        down = " ".join(shlex.quote(value) for value in ("/usr/bin/env", f"PATH={search}", tool, "down", config_path))
+        name_file = shlex.quote(f"/var/run/wireguard/{NAME}.name")
+        command += (f" && {{ name=$(/bin/cat {name_file}) || {{ {down}; exit 1; }}; "
+                    "printf 'OPENPATH_UTUN=%s\\n' \"$name\"; }")
     return f"do shell script {json.dumps(command, ensure_ascii=False)} with administrator privileges"
+
+
+def apple_interface_from_output(output: str) -> str | None:
+    match = re.search(r"(?:^|\n)OPENPATH_UTUN=(utun\d+)(?:\s|$)", output)
+    return match.group(1) if match else None
 
 
 def _remove(path: Path) -> None:
@@ -394,6 +407,17 @@ class DeviceVPN:
                     interface = (self.wireguard_dir / f"{NAME}.name").read_text(encoding="utf-8").strip()
                 except FileNotFoundError:
                     return {"state": "inactive"}
+                except PermissionError:
+                    # The elevated start recorded the utun name. When there is
+                    # no marker, wg-quick itself will reject a name collision.
+                    try:
+                        record = json.loads(self.marker.read_text(encoding="utf-8"))
+                        identity = record.get("identity", "") if isinstance(record, dict) else ""
+                        interface = identity.removeprefix("utun:") if identity.startswith("utun:") else ""
+                    except (OSError, ValueError, AttributeError):
+                        interface = ""
+                    if not interface:
+                        return {"state": "unverified", "message": "macOS restricts WireGuard status; wg-quick will check for a name collision when connecting."}
                 if not re.fullmatch(r"utun\d+", interface):
                     return {"state": "unknown", "message": "Invalid WireGuard interface name"}
                 try:
@@ -465,7 +489,7 @@ class DeviceVPN:
 
     def import_file(self, filename: str | Path) -> dict[str, Any]:
         with self.locked():
-            if self.runtime_status()["state"] != "inactive":
+            if self.runtime_status()["state"] not in ("inactive", "unverified"):
                 raise RuntimeError("Disconnect the device VPN before replacing its profile")
             source = Path(filename)
             if not source.is_file():
@@ -487,7 +511,7 @@ class DeviceVPN:
 
     def remove_profile(self) -> dict[str, bool]:
         with self.locked():
-            if self.runtime_status()["state"] != "inactive":
+            if self.runtime_status()["state"] not in ("inactive", "unverified"):
                 raise RuntimeError("Disconnect the device VPN before removing its profile")
             self.keychain.remove()
             for item in (self.metadata, self.marker, self.windows_config):
@@ -525,7 +549,7 @@ class DeviceVPN:
     def connect(self, options: dict[str, str] | None = None) -> dict[str, Any]:
         with self.locked():
             current = self.status()
-            if current["state"] != "inactive":
+            if current["state"] not in ("inactive", "unverified"):
                 raise RuntimeError(current.get("message") or "The device VPN interface already exists")
             profile, _ = self._profile()
             options = options or {}
@@ -550,14 +574,33 @@ class DeviceVPN:
                     self._relay = relay
                     profile = replace(profile, endpoint=f"127.0.0.1:{port}")
                 config = render_config(profile, safe_options, split_default_routes=(transport == "stealth" and self.platform == "win32"))
+                mac_runtime = None
                 if self.platform == "win32":
                     self._write(self.windows_config, config)
                     self.elevated("up", str(self.windows_config))
                 else:
                     with self.temp_config(config) as filename:
-                        self.elevated("up", filename)
+                        output = self.elevated("up", filename)
+                        if self.platform == "darwin":
+                            interface = apple_interface_from_output(output)
+                            try:
+                                if interface:
+                                    self.run(["/sbin/ifconfig", interface])
+                                    mac_runtime = {"state": "active", "identity": f"utun:{interface}"}
+                                else:
+                                    mac_runtime = self.runtime_status()
+                                if mac_runtime["state"] != "active" or not mac_runtime.get("identity"):
+                                    raise RuntimeError("Could not confirm the macOS WireGuard interface")
+                            except Exception as error:
+                                # The temporary profile still exists, so try to
+                                # undo an unverified start before returning.
+                                try:
+                                    self.elevated("down", filename)
+                                except Exception as rollback_error:
+                                    raise RuntimeError("Could not confirm or roll back WireGuard; inspect and stop it with system tools") from rollback_error
+                                raise RuntimeError("Could not confirm the macOS WireGuard interface; it was stopped") from error
                 started = True
-                runtime = self.runtime_status()
+                runtime = mac_runtime or self.runtime_status()
                 if runtime["state"] != "active" or not runtime.get("identity"):
                     raise RuntimeError(runtime.get("message") or "WireGuard did not report an active interface")
                 # DNS is not secret. The interface identity helps avoid treating
@@ -582,7 +625,7 @@ class DeviceVPN:
     def disconnect(self) -> dict[str, Any]:
         with self.locked():
             current = self.status()
-            if current["state"] == "inactive":
+            if current["state"] in ("inactive", "unverified"):
                 _remove(self.marker)
                 _remove(self.windows_config)
                 self._stop_relay()
@@ -606,7 +649,7 @@ class DeviceVPN:
                         self.elevated("down", filename)
             except Exception as error:
                 raise RuntimeError(f"Could not stop WireGuard: {clean_error(error)}") from error
-            if self.runtime_status()["state"] != "inactive":
+            if self.runtime_status()["state"] not in ("inactive", "unverified"):
                 raise RuntimeError("WireGuard did not confirm that the interface or service was removed")
             _remove(self.marker)
             _remove(self.windows_config)
