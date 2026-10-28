@@ -117,9 +117,11 @@ jobs:
           mkdir -p _release/artifacts _release/server _release/web
           cp -r server/dist _release/server/dist
           cp server/package.json server/package-lock.json _release/server/
+          cp docs/STEALTH.md _release/server/STEALTH.md
           cat > _release/server/README.txt <<'TEXT'
           OpenPath server: npm ci --omit=dev, then node dist/index.js.
           To serve the web archive on the same origin, set WEB_DIST to the extracted web dist directory.
+          For the opt-in device VPN TLS relay, see STEALTH.md, including mandatory backend isolation.
           Configure real credentials and secure the demo provisioning endpoints before public deployment.
           TEXT
           cp -r client/web/dist _release/web/dist
@@ -190,7 +192,7 @@ jobs:
 
             Downloads include the server, web UI testing preview, and native Qt Widgets installers for Linux x64, Windows x64, and macOS Intel/Apple Silicon. The desktop apps do not embed a browser. An Android APK is included for evaluation; it is non-debuggable but signed with a one-off test key and cannot be upgraded in place by a later build. Do not use it for production. iOS installers are not published. Desktop builds are unsigned and macOS builds are not notarized.
 
-            The device-wide WireGuard connection requires a separately configured WireGuard server and profile; desktop platforms also need system tools and administrator permission. Android requests system VPN permission and has no automatic reconnect. The separate WebSocket session does not route device traffic and is not implemented in the Android app. See the repository documentation for DNS, routing and security limitations.
+            The device-wide WireGuard connection requires a separately configured WireGuard server and profile; opt-in Stealth also requires a separately configured TLS relay. Windows Stealth disables WireGuard's block-untunneled firewall. Desktop platforms also need system tools and administrator permission. Android requests system VPN permission and has no automatic reconnect. The separate WebSocket session does not route device traffic and is not implemented in the Android app. See the repository documentation for DNS, routing and security limitations.
 
             Verify downloads with `SHA256SUMS.txt`. Profiles saved in the app remain local to that device.
           files: _release/artifacts/*

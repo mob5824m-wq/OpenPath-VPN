@@ -83,6 +83,9 @@ object ProfileValidator {
     /** Change only the endpoint; the TLS relay is a local WireGuard datagram bridge. */
     fun withStealthEndpoint(config: Config, port: Int): Config {
         require(port in 1..65535) { "Invalid local relay port." }
+        require(!config.`interface`.mtu.isPresent || config.`interface`.mtu.get() <= 1900) {
+            "Stealth VPN supports a WireGuard MTU of at most 1900; update the profile first."
+        }
         val original = config.peers.single()
         val peer = Peer.Builder().setPublicKey(original.publicKey).addAllowedIps(original.allowedIps)
             .parseEndpoint("127.0.0.1:$port")

@@ -533,6 +533,8 @@ class DeviceVPN:
             transport = options.get("transport", "direct")
             if transport not in ("direct", "stealth"):
                 raise ValueError("Select Direct or Stealth device VPN")
+            if transport == "stealth" and profile.mtu is not None and int(profile.mtu) > 1900:
+                raise ValueError("Stealth VPN supports a WireGuard MTU of at most 1900; update the profile first")
             if transport == "stealth" and self.platform == "win32" and options.get("allowWindowsStealthWithoutKillSwitch") != "yes":
                 raise ValueError("Windows Stealth requires acknowledging that WireGuard's block-untunneled firewall is disabled")
             # Validate DNS before opening the relay or changing anything.

@@ -98,6 +98,19 @@ class StealthTests(unittest.TestCase):
             vpn.status()
             self.assertFalse(vpn.relay_running())
 
+    def test_oversized_stealth_mtu_is_rejected_before_connecting(self):
+        with tempfile.TemporaryDirectory() as root:
+            source = Path(root) / 'source.conf'
+            source.write_text(SAMPLE.replace('DNS = 1.1.1.1', 'DNS = 1.1.1.1\nMTU = 2000'))
+            bridge = FakeBridge()
+            def run(args, **_): raise RuntimeError('Device "opvpn0" does not exist.')
+            vpn = DeviceVPN(root, platform='linux', keychain=FakeKeychain(), find=lambda c:c[0], run=run,
+                            relay_factory=lambda:bridge)
+            vpn.import_file(source)
+            with self.assertRaisesRegex(ValueError, 'MTU'):
+                vpn.connect({'transport':'stealth'})
+            self.assertEqual(bridge.state, 'stopped')
+
     def test_windows_requires_explicit_firewall_acknowledgment_and_splits_only_stealth(self):
         with tempfile.TemporaryDirectory() as root:
             source = Path(root) / 'source.conf'; source.write_text(SAMPLE)

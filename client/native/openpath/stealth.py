@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import os
 import re
+import shutil
 import socket
 import ssl
 import struct
@@ -42,7 +44,11 @@ def egress_interface(address: str, platform: str = sys.platform) -> str | int:
     """Discover the route BEFORE starting the VPN. IPv4 relay egress only."""
     ipaddress.IPv4Address(address)
     if platform.startswith('linux'):
-        result = subprocess.run(['ip', '-j', 'route', 'get', address], capture_output=True, text=True, timeout=5, check=True)
+        ip = next((path for path in ('/usr/sbin/ip', '/usr/bin/ip', '/sbin/ip', '/bin/ip')
+                   if os.path.isfile(path) and os.access(path, os.X_OK)), None) or shutil.which('ip')
+        if not ip:
+            raise RuntimeError('iproute2 is required to identify relay egress')
+        result = subprocess.run([ip, '-j', 'route', 'get', address], capture_output=True, text=True, timeout=5, check=True)
         routes = json.loads(result.stdout)
         device = routes[0].get('dev') if isinstance(routes, list) and routes else None
         if not isinstance(device, str) or not re.fullmatch(r'[A-Za-z0-9_.:@-]{1,15}', device) or device == 'opvpn0':

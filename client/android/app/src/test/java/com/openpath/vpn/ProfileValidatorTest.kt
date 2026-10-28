@@ -53,6 +53,8 @@ class ProfileValidatorTest {
         assertEquals(original.peers[0].publicKey, relay.peers[0].publicKey)
         assertEquals("127.0.0.1:45678", relay.peers[0].endpoint.get().toString())
         assertThrows(IllegalArgumentException::class.java) { ProfileValidator.withStealthEndpoint(original, 0) }
+        val largeMtu = parse(profile.replace("DNS = 10.7.0.1", "DNS = 10.7.0.1\nMTU = 2000"))
+        assertThrows(IllegalArgumentException::class.java) { ProfileValidator.withStealthEndpoint(largeMtu, 45678) }
     }
 
     @Test fun stealthRequiresTlsAndSignsTheExactRelayPath() {

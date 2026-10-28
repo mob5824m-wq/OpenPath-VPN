@@ -181,6 +181,7 @@ class UITests(unittest.TestCase):
         w.server_input.setText("wss://relay.example/ops")
         w.user_input.setText("relay-user")
         w.psk_input.setText("relay-secret-in-memory")
+        self.assertTrue(w.save_server_settings())
         w.vpn_transport.setCurrentIndex(w.vpn_transport.findData("stealth"))
         # A Windows acknowledgement dialog is required before the /1 routes.
         if sys.platform == "win32":

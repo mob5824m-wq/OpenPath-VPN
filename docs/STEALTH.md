@@ -68,7 +68,9 @@ blocked; no censorship-resistance or privacy guarantee is made.
    source IP and affect other clients.
 
 The fixed target receives only WireGuard-shaped packets, not a general-purpose
-UDP proxy. The configured public key and peer profile still control access at
+UDP proxy. Stealth accepts WireGuard profile MTUs up to 1900 to stay within
+the relay's bounded datagram size; reduce a larger configured MTU before use.
+The configured public key and peer profile still control access at
 the WireGuard server. Users cannot select arbitrary relay targets.
 
 ## Connect the apps

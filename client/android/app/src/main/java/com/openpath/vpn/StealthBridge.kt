@@ -64,13 +64,18 @@ internal class ProtectedSocketFactory(private val service: VpnService) : SocketF
             throw error
         }
     }
+    private fun connected(destination: InetSocketAddress, local: InetSocketAddress? = null): Socket {
+        val socket = newProtectedSocket(local)
+        try { socket.connect(destination); return socket }
+        catch (error: Exception) { socket.close(); throw error }
+    }
     override fun createSocket(): Socket = newProtectedSocket()
-    override fun createSocket(host: String, port: Int): Socket = newProtectedSocket().apply { connect(InetSocketAddress(host, port)) }
-    override fun createSocket(host: InetAddress, port: Int): Socket = newProtectedSocket().apply { connect(InetSocketAddress(host, port)) }
+    override fun createSocket(host: String, port: Int): Socket = connected(InetSocketAddress(host, port))
+    override fun createSocket(host: InetAddress, port: Int): Socket = connected(InetSocketAddress(host, port))
     override fun createSocket(host: String, port: Int, localHost: InetAddress, localPort: Int): Socket =
-        newProtectedSocket(InetSocketAddress(localHost, localPort)).apply { connect(InetSocketAddress(host, port)) }
+        connected(InetSocketAddress(host, port), InetSocketAddress(localHost, localPort))
     override fun createSocket(host: InetAddress, port: Int, localHost: InetAddress, localPort: Int): Socket =
-        newProtectedSocket(InetSocketAddress(localHost, localPort)).apply { connect(InetSocketAddress(host, port)) }
+        connected(InetSocketAddress(host, port), InetSocketAddress(localHost, localPort))
 }
 
 internal object StealthProtocol {

@@ -20,7 +20,11 @@ MANAGER = str(WG_DIR / 'wireguard.exe')
 
 
 def command(*args, input=None):
-    return subprocess.run(args, input=input, text=True, capture_output=True, check=True).stdout.strip()
+    result = subprocess.run(args, input=input, text=True, capture_output=True, check=False)
+    if result.returncode:
+        # These commands never print config contents; don't include their input.
+        raise RuntimeError(f"{Path(args[0]).name} failed ({result.returncode}): {(result.stderr or result.stdout)[-1500:]}")
+    return result.stdout.strip()
 
 
 def keypair():
