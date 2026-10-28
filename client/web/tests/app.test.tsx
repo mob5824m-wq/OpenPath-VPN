@@ -81,6 +81,12 @@ async function openSocket(socket:FakeSocket) {
   await screen.findByText(/Session connected/)
 }
 
+test('release preview does not claim unpublished platform installers', () => {
+  render(<App />)
+  assert.ok(screen.getByText('Browse published app releases; availability varies.'))
+  assert.equal(screen.queryByText('Native installers for Windows, macOS, Linux, Android & iOS'), null)
+})
+
 test('real server selection, mode switching, fetch, disconnect and recent reconnect', async () => {
   const user = userEvent.setup({ document })
   render(<App />)

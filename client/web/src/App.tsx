@@ -1130,7 +1130,7 @@ export default function App(){
             <button onClick={()=>{ setTab('releases'); fetchReleases() }} style={{ background:'#1a1a24', border:'1px solid #2a2a38', color:'#a78bfa', padding:'4px 8px', borderRadius:999, fontSize:11, cursor:'pointer' }}>View all →</button>
           </div>
           <div style={{ color:'#9ca3af', fontSize:11, marginTop:6 }}>
-            {releases?.length ? `${releases.length} releases • latest ${releases[0]?.tag_name || releases[0]?.name}` : releases ? 'No releases published yet' : 'Native installers for Windows, macOS, Linux, Android & iOS'}
+            {releases?.length ? `${releases.length} releases • latest ${releases[0]?.tag_name || releases[0]?.name}` : releases ? 'No releases published yet' : 'Browse published app releases; availability varies.'}
           </div>
           <div style={{ marginTop:8, display:'flex', gap:6, flexWrap:'wrap' }}>
             {['windows','macos','linux','android','ios'].map(id=>(
@@ -1499,7 +1499,7 @@ export default function App(){
             <SettingRow
               icon="⬆"
               title="Releases"
-              sub={releases?.length ? `Latest ${releases[0]?.tag_name || releases[0]?.name}` : 'Builds for Windows, macOS, Linux, Android, iOS'}
+              sub={releases?.length ? `Latest ${releases[0]?.tag_name || releases[0]?.name}` : 'Browse published app releases'}
               onClick={()=>{ setTab('releases'); fetchReleases() }}
             />
             <SettingRow icon="⌥" title="Source code" sub="GitHub repository" onClick={()=>openExternal('https://github.com/mob5824m-wq/OpenPath-VPN')} />
