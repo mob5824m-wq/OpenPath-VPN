@@ -13,7 +13,7 @@ import threading
 import time
 
 from openpath.stealth import StealthBridge
-from openpath.wireguard import DeviceVPN
+from openpath.wireguard import DeviceVPN, apple_interface_from_output, apple_script_command
 
 ROOT = Path(__file__).resolve().parents[1]
 WG = shutil.which('wg')
@@ -79,9 +79,14 @@ Endpoint = 127.0.0.1:{port}
 AllowedIPs = 0.0.0.0/0, ::/0
 PersistentKeepalive = 2
 ''', encoding='ascii')
-        sudo(QUICK, 'up', str(client_config))
+        # Exercise the same shell command the app passes to AppleScript, but
+        # use CI's passwordless sudo instead of an interactive GUI prompt.
+        apple_script = apple_script_command(QUICK, 'up', str(client_config))
+        shell_command = json.loads(apple_script[len('do shell script '):-len(' with administrator privileges')])
+        output = sudo('/bin/sh', '-c', shell_command)
         client_up = True
-        actual_name = sudo('/bin/cat', '/var/run/wireguard/opvpn0.name')
+        actual_name = apple_interface_from_output(output)
+        assert actual_name and actual_name == sudo('/bin/cat', '/var/run/wireguard/opvpn0.name')
         # On CI, wireguard-go's runtime directory is root-only. Verify the
         # ordinary unprivileged app can use its recorded utun identity.
         vpn = DeviceVPN(root, platform='darwin')
@@ -101,10 +106,11 @@ PersistentKeepalive = 2
         assert bridge.status() == 'connected'
         print('macOS wireguard-go established a real loopback peer handshake through verified TLS.', flush=True)
         relay.terminate(); relay.wait(timeout=10)
-        deadline = time.monotonic() + 10
+        # A silent TCP loss may only be detected by the WebSocket ping timer.
+        deadline = time.monotonic() + 35
         while bridge.status() == 'connected' and time.monotonic() < deadline:
             time.sleep(.1)
-        assert bridge.status() == 'failed'
+        assert bridge.status() == 'failed', f"relay exit={relay.poll()}, bridge={bridge.status()}"
         assert '127.0.0.1:' in sudo(WG, 'show', actual_name, 'endpoints')
         print('Relay failure reported separately; endpoint did not fall back to direct UDP.', flush=True)
         sudo(QUICK, 'down', str(client_config))

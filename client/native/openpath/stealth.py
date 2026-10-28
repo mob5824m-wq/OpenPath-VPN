@@ -119,7 +119,7 @@ class StealthBridge:
                 from websockets.sync.client import connect
                 ws = connect(url, sock=outer, ssl=ssl.create_default_context(), server_hostname=parsed.hostname,
                              open_timeout=8, close_timeout=1, compression=None, max_size=MAX_PACKET, max_queue=32,
-                             ping_interval=20, ping_timeout=20, proxy=None)
+                             ping_interval=10, ping_timeout=10, proxy=None)
             except Exception:
                 outer.close()
                 raise

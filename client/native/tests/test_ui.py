@@ -176,6 +176,17 @@ class UITests(unittest.TestCase):
         self.assertEqual(self.vpn.imported, "/tmp/profile.conf")
         self.assertTrue(w.connect_button.isEnabled())
 
+    def test_unverified_macos_status_is_explained_but_allows_a_checked_start(self):
+        self.vpn.status = lambda: {"state": "unverified", "owned": False, "configured": True,
+                                   "installed": True, "endpoint": "vpn.example.com:51820",
+                                   "message": "wg-quick will check for a name collision."}
+        self.window.refresh_status()
+        self.wait_for(lambda: not self.window.status_busy)
+        self.assertEqual(self.window.status_label.text(), "Device VPN status unverified")
+        self.assertIn("name collision", self.window.status_detail.text())
+        self.assertTrue(self.window.connect_button.isEnabled())
+        self.assertFalse(self.window.disconnect_button.isEnabled())
+
     def test_stealth_transport_uses_settings_without_persisting_psk(self):
         w = self.window
         w.server_input.setText("wss://relay.example/ops")
