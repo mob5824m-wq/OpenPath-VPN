@@ -62,6 +62,54 @@ test('authenticated binary WireGuard packets reach only the configured UDP targe
   assert.equal(seen, 1);
 });
 
+test('TLS fixture writes useful diagnostics without logging authentication data', async () => {
+  const { spawn } = await import('node:child_process');
+  const { createServer: createTcpServer } = await import('node:net');
+  const { mkdtempSync, readFileSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const probe = createTcpServer();
+  await new Promise<void>(resolve => probe.listen(0, '127.0.0.1', resolve));
+  const port = (probe.address() as import('node:net').AddressInfo).port;
+  await new Promise<void>(resolve => probe.close(() => resolve()));
+  const dir = mkdtempSync(join(tmpdir(), 'openpath-trace-'));
+  const trace = join(dir, 'relay.log');
+  const psk = 'only-for-disposable-ci-tests-not-production-123';
+  const child = spawn(process.execPath, ['--import', 'tsx', 'tests/fixtures/stealth-test-server.ts'], {
+    cwd:process.cwd(), env:{...process.env, TEST_TLS_PORT:String(port), TEST_TLS_TRACE_FILE:trace,
+      TEST_WG_TARGET:`127.0.0.1:${target.address().port}`}, stdio:['ignore', 'pipe', 'pipe'],
+  });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('test TLS relay startup timed out')), 10000);
+      child.stdout.on('data', chunk => { if (String(chunk).includes('TEST RELAY READY')) { clearTimeout(timer); resolve(); } });
+      child.once('exit', code => { clearTimeout(timer); reject(new Error(`test TLS relay exited: ${code}`)); });
+    });
+    const ts = String(Date.now());
+    const nonce = randomBytes(16).toString('hex');
+    const signature = createHmac('sha256', psk).update(`${ts}.${nonce}./stealth-wg`).digest('hex');
+    const ws = new WebSocket(`wss://127.0.0.1:${port}/stealth-wg?user=ci-test&auth=${ts}.${nonce}.${signature}`, {
+      ca:readFileSync('../client/android/app/src/debug/res/raw/stealth_test_ca.pem'),
+    });
+    assert.deepEqual(JSON.parse(String(await next(ws))), {type:'ready', protocol:'wireguard-ws', version:1});
+    const closed = new Promise(resolve => ws.once('close', resolve));
+    ws.close();
+    await closed;
+    const log = readFileSync(trace, 'utf8');
+    assert.match(log, /tls-established TLSv1\.[23]/);
+    assert.match(log, /websocket-upgrade-received/);
+    assert.match(log, /websocket-upgrade-handled/);
+    assert.ok(!log.includes(psk) && !log.includes('auth=') && !log.includes(signature));
+  } finally {
+    if (child.exitCode === null) {
+      const exited = new Promise(resolve => child.once('exit', resolve));
+      child.kill();
+      await exited;
+    }
+    rmSync(dir, {recursive:true, force:true});
+  }
+});
+
 test('relay-only server disables legacy provisioning and rejects reused session secrets', async () => {
   const { spawn } = await import('node:child_process');
   const { createServer: createTcpServer } = await import('node:net');

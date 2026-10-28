@@ -1,8 +1,8 @@
 name: Native Installers
 
 on:
-  push:
-    branches: [main, "arena/**"]
+  # PRs validate changes and main's tagged release calls this workflow. Avoid
+  # duplicate branch-push builds competing for scarce macOS ARM runners.
   pull_request:
   workflow_dispatch:
     inputs:
@@ -83,37 +83,6 @@ jobs:
             Write-Output "::error::Windows Stealth handshake failed: $tail"
             exit $code
           }
-
-  stealth-macos:
-    name: macOS Stealth relay handshake
-    runs-on: macos-15
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.tag || github.sha }}
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: Install WireGuard and relay test dependencies
-        run: |
-          brew list wireguard-tools >/dev/null 2>&1 || brew install wireguard-tools
-          npm ci --prefix server
-          python -m pip install websockets==15.0.1
-      - name: Verify a real wireguard-go handshake through TLS
-        shell: bash
-        run: |
-          set -uo pipefail
-          set +e
-          PYTHONPATH=client/native python scripts/test-stealth-macos.py 2>&1 | tee "$RUNNER_TEMP/stealth-macos.log"
-          status=${PIPESTATUS[0]}
-          if [ "$status" -ne 0 ]; then
-            echo "::error::macOS Stealth handshake failed: $(tail -n 25 "$RUNNER_TEMP/stealth-macos.log" | tr '\n\r' '  ')"
-            exit "$status"
-          fi
 
   linux:
     name: Linux x64 native app
@@ -312,6 +281,29 @@ jobs:
           status=${PIPESTATUS[0]}
           if [ "$status" -ne 0 ]; then
             echo "::error::Native tests failed: $(tail -n 45 "$RUNNER_TEMP/openpath-native-tests.log" | tr '\n\r' '  ')"
+            exit "$status"
+          fi
+      # Keep the real ARM64 relay test and the ARM64 package on one runner.
+      # This preserves the release gate while halving ARM runner allocations.
+      - uses: actions/setup-node@v4
+        if: matrix.arch == 'arm64'
+        with:
+          node-version: '22'
+      - name: Install WireGuard and relay test dependencies
+        if: matrix.arch == 'arm64'
+        run: |
+          brew list wireguard-tools >/dev/null 2>&1 || brew install wireguard-tools
+          npm ci --prefix server
+      - name: Verify a real wireguard-go handshake through TLS
+        if: matrix.arch == 'arm64'
+        shell: bash
+        run: |
+          set -uo pipefail
+          set +e
+          PYTHONPATH=client/native python scripts/test-stealth-macos.py 2>&1 | tee "$RUNNER_TEMP/stealth-macos.log"
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            echo "::error::macOS Stealth handshake failed: $(tail -n 50 "$RUNNER_TEMP/stealth-macos.log" | tr '\n\r' '  ')"
             exit "$status"
           fi
       - id: version

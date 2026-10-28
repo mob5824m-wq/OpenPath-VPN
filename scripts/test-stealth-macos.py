@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -58,8 +59,9 @@ AllowedIPs = 10.203.0.2/32
     try:
         sudo(QUICK, 'up', str(server_config))
         server_up = True
+        relay_env = {**os.environ, 'TEST_TLS_TRACE_FILE': str(root / 'relay-trace.log')}
         relay = subprocess.Popen(['node', '--import', 'tsx', 'tests/fixtures/stealth-test-server.ts'],
-                                 cwd=ROOT / 'server', stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                                 cwd=ROOT / 'server', env=relay_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         ready = threading.Event()
         output = []
         def read_ready():
@@ -117,12 +119,19 @@ PersistentKeepalive = 2
         client_up = False
         assert vpn.runtime_status()['state'] in ('inactive', 'unverified'), vpn.runtime_status()
     finally:
+        failed = sys.exc_info()[0] is not None
         if client_up:
             try: sudo(QUICK, 'down', str(client_config))
             except Exception as error: print(f'Client teardown failed: {type(error).__name__}', flush=True)
         bridge.stop()
         if relay and relay.poll() is None:
             relay.terminate(); relay.wait(timeout=10)
+        if failed and relay:
+            print(f'Test relay exit code: {relay.poll()}', flush=True)
+            trace = root / 'relay-trace.log'
+            if trace.exists(): print('Test relay TLS events:\n' + trace.read_text()[-2000:], flush=True)
+            stderr = relay.stderr.read()
+            if stderr: print('Test relay stderr:\n' + stderr[-2000:], flush=True)
         if server_up:
             try: sudo(QUICK, 'down', str(server_config))
             except Exception as error: print(f'Server teardown failed: {type(error).__name__}', flush=True)
