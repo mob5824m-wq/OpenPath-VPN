@@ -347,6 +347,7 @@ export default function App(){
   const [startedAt, setStartedAt] = useState<number|null>(null)
   const [now, setNow] = useState(Date.now())
   const wsRef = useRef<WebSocket|null>(null)
+  const connectTimer = useRef<any>(null)
   const rxRef = useRef(0)
   const txRef = useRef(0)
 
@@ -525,6 +526,7 @@ export default function App(){
   }
 
   const closeSocket = ()=>{
+    clearTimeout(connectTimer.current)
     const ws = wsRef.current
     wsRef.current = null
     if(ws){
@@ -592,6 +594,7 @@ export default function App(){
         closeSocket()
       }
     }, 8000)
+    connectTimer.current = timeout
 
     ws.onopen = ()=>{
       opened = true
